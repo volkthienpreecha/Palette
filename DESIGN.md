@@ -100,7 +100,7 @@ Palette should be flat by default with layered atmosphere only around active too
 ### Do:
 - **Do** make the first screen a blank canvas with one obvious way to begin.
 - **Do** use painterly language for the flow: prime, swatches, first wash, brush, varnish, set the paint.
-- **Do** make interruptibility visible at all times while Codex is painting.
+- **Do** make interruptibility visible at all times while Palette is painting.
 - **Do** keep beginner guidance short, concrete, and tied to the current action.
 - **Do** make the product feel demoable in seconds, with visible formation rather than hidden waiting.
 - **Do** use warm off-white surfaces and graphite-like text instead of pure white and pure black.

@@ -1,0 +1,945 @@
+import type {
+  PaletteSectionKind,
+  PaletteSectionModel,
+  PaletteSectionVariant,
+} from "./sectionRenderers";
+
+export type PaletteTheme = "atelier" | "premium";
+
+export type PaletteSwatch = {
+  id: string;
+  title: string;
+  note: string;
+  url?: string;
+  tone?: "paper" | "glass" | "ink";
+  colors?: string[];
+};
+
+export type BrushLogEntry = {
+  id: string;
+  label: string;
+  detail: string;
+};
+
+export type PaletteProject = {
+  id: string;
+  name: string;
+  theme: PaletteTheme;
+  swatchAccent?: string;
+  swatchColors?: string[];
+  sections: PaletteSectionModel[];
+  swatches: PaletteSwatch[];
+  brushLog: BrushLogEntry[];
+  past: PaletteSnapshot[];
+  future: PaletteSnapshot[];
+  exportText?: string;
+};
+
+export type PaletteSnapshot = {
+  theme: PaletteTheme;
+  swatchAccent?: string;
+  swatchColors?: string[];
+  sections: PaletteSectionModel[];
+  swatches: PaletteSwatch[];
+  brushLog: BrushLogEntry[];
+};
+
+export type CommandContext = {
+  selectedId: string | null;
+  project: PaletteProject;
+};
+
+export type PaletteOperation =
+  | { type: "start_project"; template: "robot-coffee" | "portfolio" | "studio-saas" }
+  | { type: "set_theme"; theme: PaletteTheme }
+  | { type: "add_section"; section: PaletteSectionModel; afterId?: string }
+  | { type: "remove_section"; id: string }
+  | { type: "move_section"; id: string; direction: -1 | 1 }
+  | { type: "update_section"; id: string; patch: Partial<PaletteSectionModel> }
+  | { type: "set_variant"; id: string; variant: PaletteSectionVariant }
+  | { type: "add_waitlist"; id: string }
+  | { type: "add_swatch"; swatch: PaletteSwatch }
+  | { type: "export_project" };
+
+export type IntentResult = {
+  operations: PaletteOperation[];
+  status: string;
+  shouldPaint?: boolean;
+};
+
+export type OperationResult = {
+  project: PaletteProject;
+  status: string;
+};
+
+const starterSwatches: PaletteSwatch[] = [
+  {
+    id: "glass",
+    title: "Liquid glass",
+    note: "Approved button material for active controls.",
+    tone: "glass",
+  },
+  {
+    id: "paper",
+    title: "Atelier paper",
+    note: "Warm canvas, graphite ink, sparse pigment.",
+    tone: "paper",
+  },
+];
+
+export const paintingStageLabels = [
+  "Prime canvas",
+  "Mix swatches",
+  "Paint navigation",
+  "Lay first wash",
+  "Paint details",
+  "Frame pricing",
+  "Varnish",
+  "Set paint",
+];
+
+export function createBlankProject(): PaletteProject {
+  return {
+    id: "palette-project",
+    name: "Untitled canvas",
+    theme: "atelier",
+    sections: [],
+    swatches: starterSwatches,
+    brushLog: [logEntry("Canvas primed", "A clean atelier canvas is ready.")],
+    past: [],
+    future: [],
+  };
+}
+
+export function createProjectFromTemplate(
+  template: "robot-coffee" | "portfolio" | "studio-saas",
+): PaletteProject {
+  const project = createBlankProject();
+  project.name =
+    template === "portfolio"
+      ? "Portfolio study"
+      : template === "studio-saas"
+        ? "Studio software study"
+        : "Rivet and Roast";
+  project.sections = templateSections(template);
+  project.brushLog = [
+    logEntry("Canvas primed", "Palette chose a controlled section model."),
+    logEntry("Swatches mixed", "Style, layout, and interaction rules are ready."),
+  ];
+  return project;
+}
+
+export function templateSections(template: "robot-coffee" | "portfolio" | "studio-saas") {
+  if (template === "portfolio") {
+    return [
+      navSection(
+        "Atelier Works",
+        [{ label: "Work" }, { label: "Notes" }, { label: "Contact" }],
+        "Contact",
+      ),
+      heroSection(
+        "A portfolio that feels collected, not generated.",
+        "Palette paints an editorial personal site with selected work, studio notes, and a quiet contact path.",
+        "View work",
+        "Selected work, studio notes, and a clear contact path",
+      ),
+      statsSection(),
+      gallerySection(),
+      testimonialsSection(),
+      formSection("Request a studio note", "Ask for a project, collaboration, or critique."),
+      footerSection("Atelier Works", "Built as a live Palette canvas."),
+    ];
+  }
+
+  if (template === "studio-saas") {
+    return [
+      navSection(
+        "Northline",
+        [{ label: "Boards" }, { label: "Signals" }, { label: "Teams" }],
+        "Open",
+      ),
+      heroSection(
+        "A calmer command room for small teams.",
+        "Palette paints a focused SaaS surface with live sections, compact forms, proof, and clear action paths.",
+        "Start workspace",
+        "Live sections, compact forms, and clear action paths",
+      ),
+      featuresSection("Operational rhythm", "The interface stays dense enough to work and warm enough to trust."),
+      pricingSection(),
+      testimonialsSection(),
+      ctaSection("Shape the next release.", "Steer one section at a time and keep the canvas readable."),
+      footerSection("Northline", "Painted live with Palette."),
+    ];
+  }
+
+  return [
+    navSection("Rivet & Roast", [
+      { label: "Menu" },
+      { label: "Robots" },
+      { label: "Visit" },
+    ]),
+    heroSection(
+      "Coffee pulled by robots, served with studio calm.",
+      "A small autonomous cafe where every pour is measured, warm, and ready before the morning rush reaches the door.",
+      "Join waitlist",
+      "First tasting opens at 7:30 AM",
+    ),
+    featuresSection("Three strokes of service", "Fast enough for commuters, quiet enough for regulars."),
+    pricingSection(),
+    ctaSection(
+      "Join the first morning tasting.",
+      "Palette can still steer this surface while the canvas stays editable.",
+    ),
+    footerSection("Rivet & Roast", "Painted live with Palette."),
+  ];
+}
+
+export function parseIntent(command: string, context: CommandContext): IntentResult {
+  const text = command.trim().toLowerCase();
+  const selectedId = context.selectedId;
+  const selected = selectedId ? context.project.sections.find((section) => section.id === selectedId) : undefined;
+
+  if (!text) {
+    return { operations: [], status: "No brushstroke given." };
+  }
+
+  if (text.includes("portfolio")) {
+    return {
+      operations: [{ type: "start_project", template: "portfolio" }],
+      status: "Palette selected an editorial portfolio model.",
+      shouldPaint: true,
+    };
+  }
+
+  if (text.includes("saas") || text.includes("dashboard") || text.includes("team")) {
+    return {
+      operations: [{ type: "start_project", template: "studio-saas" }],
+      status: "Palette selected a calm software workspace model.",
+      shouldPaint: true,
+    };
+  }
+
+  if (
+    text.includes("build") ||
+    text.includes("landing page") ||
+    text.includes("robot coffee") ||
+    text.includes("coffee shop")
+  ) {
+    return {
+      operations: [{ type: "start_project", template: "robot-coffee" }],
+      status: "Palette selected the robot coffee shop model.",
+      shouldPaint: true,
+    };
+  }
+
+  if (text.includes("darker") || text.includes("premium") || text.includes("apple")) {
+    return {
+      operations: [
+        { type: "set_theme", theme: "premium" },
+        ...context.project.sections.map((section) => ({
+          type: "set_variant" as const,
+          id: section.id,
+          variant: (section.variant === "playful" ? "playful" : "premium") as PaletteSectionVariant,
+        })),
+      ],
+      status: "Mixed a darker glaze and tightened the surface.",
+    };
+  }
+
+  if (text.includes("lighter") || text.includes("atelier") || text.includes("classic")) {
+    return {
+      operations: [{ type: "set_theme", theme: "atelier" }],
+      status: "Returned the canvas to the warm atelier wash.",
+    };
+  }
+
+  if (text.includes("waitlist") || text.includes("email form")) {
+    const id = selected?.kind === "hero" ? selected.id : firstSectionId(context.project, "hero");
+    return id
+      ? { operations: [{ type: "add_waitlist", id }], status: "Painted a waitlist form into the hero." }
+      : { operations: [{ type: "add_section", section: formSection() }], status: "Painted a form section." };
+  }
+
+  if (text.includes("testimonial") || text.includes("quote")) {
+    return {
+      operations: [{ type: "add_section", section: testimonialsSection(), afterId: selectedId ?? undefined }],
+      status: "Pinned studio notes onto the canvas.",
+    };
+  }
+
+  if (text.includes("gallery") || text.includes("image strip") || text.includes("references")) {
+    return {
+      operations: [{ type: "add_section", section: gallerySection(), afterId: selectedId ?? undefined }],
+      status: "Painted a gallery strip from the reference language.",
+    };
+  }
+
+  if (text.includes("stats") || text.includes("numbers")) {
+    return {
+      operations: [{ type: "add_section", section: statsSection(), afterId: selectedId ?? undefined }],
+      status: "Added a small structure strip to the canvas.",
+    };
+  }
+
+  if (text.includes("form") || text.includes("contact")) {
+    return {
+      operations: [{ type: "add_section", section: formSection(), afterId: selectedId ?? undefined }],
+      status: "Painted a form section.",
+    };
+  }
+
+  if (text.includes("pricing")) {
+    return {
+      operations: [{ type: "add_section", section: pricingSection(), afterId: selectedId ?? undefined }],
+      status: "Framed a pricing section.",
+    };
+  }
+
+  if (text.includes("playful")) {
+    const id = selectedId ?? firstSectionId(context.project, "features") ?? firstSectionId(context.project, "hero");
+    return id
+      ? { operations: [{ type: "set_variant", id, variant: "playful" }], status: "Changed only the selected area." }
+      : { operations: [], status: "Select a section before painting that style." };
+  }
+
+  if (text.includes("minimal") || text.includes("quieter")) {
+    const id = selectedId ?? firstSectionId(context.project, "hero");
+    return id
+      ? { operations: [{ type: "set_variant", id, variant: "minimal" }], status: "Quieted the selected section." }
+      : { operations: [], status: "Select a section before quieting it." };
+  }
+
+  if (text.includes("delete") || text.includes("remove")) {
+    return selectedId
+      ? { operations: [{ type: "remove_section", id: selectedId }], status: "Removed the selected section." }
+      : { operations: [], status: "Select a section before removing it." };
+  }
+
+  if (text.includes("move up")) {
+    return selectedId
+      ? { operations: [{ type: "move_section", id: selectedId, direction: -1 }], status: "Moved the section upward." }
+      : { operations: [], status: "Select a section before moving it." };
+  }
+
+  if (text.includes("move down")) {
+    return selectedId
+      ? { operations: [{ type: "move_section", id: selectedId, direction: 1 }], status: "Moved the section downward." }
+      : { operations: [], status: "Select a section before moving it." };
+  }
+
+  if (text.includes("set paint") || text.includes("export")) {
+    return { operations: [{ type: "export_project" }], status: "Set the paint into a project bundle." };
+  }
+
+  const id = selectedId ?? firstSectionId(context.project, "hero");
+  if (id && (text.includes("headline") || text.includes("title"))) {
+    return {
+      operations: [{ type: "update_section", id, patch: { title: toTitle(command.replace(/headline|title/gi, "")) } }],
+      status: "Repainted the section headline.",
+    };
+  }
+
+  return { operations: [], status: "Palette saved that as a note. Select a section for a precise stroke." };
+}
+
+export function applyOperation(project: PaletteProject, operation: PaletteOperation): OperationResult {
+  const snapshot = takeSnapshot(project);
+  const next = cloneProject(project);
+
+  switch (operation.type) {
+    case "start_project": {
+      const created = createProjectFromTemplate(operation.template);
+      created.swatches = project.swatches;
+      created.swatchAccent = project.swatchAccent;
+      created.swatchColors = project.swatchColors;
+      created.sections = project.swatchColors?.length
+        ? created.sections.map((section) => applySwatchToSection(section, project.swatches[0], project.swatchColors ?? []))
+        : created.sections;
+      return {
+        project: {
+          ...created,
+          past: [...project.past, snapshot],
+          future: [],
+          brushLog: [...created.brushLog, logEntry("Project shaped", "A reusable template model is ready.")],
+        },
+        status: "Palette shaped a reusable project model.",
+      };
+    }
+    case "set_theme":
+      next.theme = operation.theme;
+      return commit(next, snapshot, "Theme mixed", "The canvas theme changed.");
+    case "add_section":
+      next.sections = insertSection(
+        next.sections,
+        next.swatchColors?.length
+          ? applySwatchToSection(operation.section, next.swatches[0], next.swatchColors)
+          : operation.section,
+        operation.afterId,
+      );
+      return commit(next, snapshot, "Section painted", `${operation.section.kind} joined the canvas.`);
+    case "remove_section":
+      next.sections = next.sections.filter((section) => section.id !== operation.id);
+      return commit(next, snapshot, "Section lifted", "The selected section was removed.");
+    case "move_section":
+      next.sections = moveSection(next.sections, operation.id, operation.direction);
+      return commit(next, snapshot, "Section moved", "The selected section changed position.");
+    case "update_section":
+      next.sections = next.sections.map((section) =>
+        section.id === operation.id ? { ...section, ...operation.patch } : section,
+      );
+      return commit(next, snapshot, "Section repainted", "The selected section changed.");
+    case "set_variant":
+      next.sections = next.sections.map((section) =>
+        section.id === operation.id ? { ...section, variant: operation.variant } : section,
+      );
+      return commit(next, snapshot, "Variant mixed", "The selected style changed.");
+    case "add_waitlist":
+      next.sections = next.sections.map((section) =>
+        section.id === operation.id ? { ...section, hasWaitlist: true } : section,
+      );
+      return commit(next, snapshot, "Waitlist painted", "A form was painted into the selected section.");
+    case "add_swatch":
+      next.swatches = [operation.swatch, ...next.swatches];
+      mixSwatchIntoProject(next, operation.swatch);
+      return commit(next, snapshot, "Swatch pinned", "A reference was mixed into the canvas.");
+    case "export_project":
+      next.exportText = createExportBundle(next);
+      return commit(next, snapshot, "Paint set", "A project bundle is ready to save.");
+    default:
+      return { project, status: "No operation was applied." };
+  }
+}
+
+export function undoProject(project: PaletteProject): OperationResult {
+  const previous = project.past[project.past.length - 1];
+  if (!previous) return { project, status: "No earlier brushstroke to undo." };
+  const current = takeSnapshot(project);
+  return {
+    project: {
+      ...project,
+      theme: previous.theme,
+      swatchAccent: previous.swatchAccent,
+      swatchColors: previous.swatchColors,
+      sections: previous.sections,
+      swatches: previous.swatches,
+      brushLog: [...previous.brushLog, logEntry("Undo", "Returned to the previous brushstroke.")],
+      past: project.past.slice(0, -1),
+      future: [current, ...project.future],
+    },
+    status: "Returned to the previous brushstroke.",
+  };
+}
+
+export function redoProject(project: PaletteProject): OperationResult {
+  const nextSnapshot = project.future[0];
+  if (!nextSnapshot) return { project, status: "No undone brushstroke to replay." };
+  const current = takeSnapshot(project);
+  return {
+    project: {
+      ...project,
+      theme: nextSnapshot.theme,
+      swatchAccent: nextSnapshot.swatchAccent,
+      swatchColors: nextSnapshot.swatchColors,
+      sections: nextSnapshot.sections,
+      swatches: nextSnapshot.swatches,
+      brushLog: [...nextSnapshot.brushLog, logEntry("Redo", "Replayed the next brushstroke.")],
+      past: [...project.past, current],
+      future: project.future.slice(1),
+    },
+    status: "Replayed the next brushstroke.",
+  };
+}
+
+export function createExportBundle(project: PaletteProject): string {
+  const projectModel = serializeProject(project);
+  return JSON.stringify(
+    {
+      name: project.name,
+      theme: project.theme,
+      swatchAccent: project.swatchAccent,
+      swatchColors: project.swatchColors,
+      generatedAt: new Date().toISOString(),
+      note: "Palette exports a structured project model plus generated React source.",
+      files: [
+        {
+          path: "src/generated/palette-project.json",
+          content: JSON.stringify(projectModel, null, 2),
+        },
+        {
+          path: "src/generated/PalettePage.tsx",
+          content: createPalettePageSource(project),
+        },
+      ],
+    },
+    null,
+    2,
+  );
+}
+
+export function sectionStatus(section: PaletteSectionModel, index: number): string {
+  if (section.kind === "nav") return "Painting the navigation as the first visible line.";
+  if (section.kind === "hero") return "Laying the hero section in one clean wash.";
+  if (section.kind === "features") return "Adding the reasons this surface matters.";
+  if (section.kind === "pricing") return "Framing the offer before the paint sets.";
+  if (section.kind === "testimonials") return "Pinning studio notes to the canvas.";
+  if (section.kind === "gallery") return "Painting a gallery from the reference swatches.";
+  if (section.kind === "form") return "Adding a form path for the next action.";
+  if (section.kind === "cta") return "Varnishing the final call to action.";
+  if (section.kind === "footer") return "Setting the final studio mark.";
+  return `Painting section ${index + 1}.`;
+}
+
+function mixSwatchIntoProject(project: PaletteProject, swatch: PaletteSwatch): void {
+  const colors = normalizedColors(swatch.colors);
+  const accent = colors[0];
+  if (!accent) return;
+
+  project.swatchAccent = accent;
+  project.swatchColors = colors;
+  project.sections = project.sections.map((section) => applySwatchToSection(section, swatch, colors));
+}
+
+function applySwatchToSection(
+  section: PaletteSectionModel,
+  swatch: PaletteSwatch,
+  colors: string[],
+): PaletteSectionModel {
+  if (section.kind === "features") {
+    const fallbackFeatures = [
+      { title: "Measured pour", copy: "Robotic arms tune grind, heat, and timing for each order." },
+      { title: "Human calm", copy: "The room stays quiet, tactile, and easy to understand." },
+      { title: "Morning memory", copy: "Regular orders reappear before the line reaches the counter." },
+    ];
+    const features = section.features ?? fallbackFeatures;
+    return {
+      ...section,
+      features: features.map((feature, index) => ({
+        ...feature,
+        accent: colors[index % colors.length],
+      })),
+    };
+  }
+
+  if (section.kind === "gallery") {
+    const fallbackGallery: NonNullable<PaletteSectionModel["gallery"]> = [
+      { title: "Morning bar", copy: "A calm counter with precise service." },
+      { title: "Robot pour", copy: "Mechanical movement made visible and warm." },
+      { title: "Studio table", copy: "A place for tasting notes and quiet work." },
+    ];
+    const gallery = section.gallery ?? fallbackGallery;
+    return {
+      ...section,
+      gallery: gallery.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              title: swatch.title || item.title,
+              copy: swatch.note || item.copy,
+              imageUrl: swatch.url,
+              imageAlt: swatch.title || item.imageAlt || item.title,
+            }
+          : item,
+      ),
+    };
+  }
+
+  if (section.kind === "hero" || section.kind === "cta") {
+    return {
+      ...section,
+      eyebrow: section.eyebrow ?? "Reference mixed",
+    };
+  }
+
+  return section;
+}
+
+function normalizedColors(colors: string[] | undefined): string[] {
+  return (colors ?? []).filter((color) => /^#[0-9a-f]{6}$/i.test(color)).slice(0, 5);
+}
+
+function serializeProject(project: PaletteProject): Omit<PaletteProject, "exportText"> {
+  const { exportText: _exportText, ...model } = project;
+  return clone(model);
+}
+
+function createPalettePageSource(project: PaletteProject): string {
+  const sectionsSource = JSON.stringify(project.sections, null, 2);
+  const themeSource = JSON.stringify(project.theme);
+  const accentSource = JSON.stringify(project.swatchAccent ?? null);
+  const colorsSource = JSON.stringify(project.swatchColors ?? []);
+
+  return `import type { FormEvent } from "react";
+
+type SectionAction = {
+  label: string;
+  href?: string;
+};
+
+type PaletteSection = {
+  id: string;
+  kind: string;
+  title: string;
+  subtitle?: string;
+  eyebrow?: string;
+  variant?: string;
+  hasWaitlist?: boolean;
+  links?: SectionAction[];
+  actions?: SectionAction[];
+  features?: { title: string; copy: string; accent?: string }[];
+  plans?: { name: string; price: string; copy: string; featured?: boolean }[];
+  testimonials?: { quote: string; name: string; role?: string }[];
+  stats?: { value: string; label: string }[];
+  fields?: { id: string; label: string; type?: string; placeholder?: string }[];
+  gallery?: { title: string; copy?: string; imageUrl?: string; imageAlt?: string }[];
+  footerText?: string;
+};
+
+const sections: PaletteSection[] = ${sectionsSource};
+const theme = ${themeSource};
+const swatchAccent: string | null = ${accentSource};
+const swatchColors: string[] = ${colorsSource};
+
+export default function PalettePage() {
+  return (
+    <main className={\`generated-page generated-\${theme}\`}>
+      {sections.map((section) => (
+        <section className={\`generated-section section-\${section.kind} variant-\${section.variant ?? "atelier"}\`} key={section.id}>
+          <SectionView section={section} />
+        </section>
+      ))}
+    </main>
+  );
+}
+
+function SectionView({ section }: { section: PaletteSection }) {
+  switch (section.kind) {
+    case "nav":
+      return <NavSection section={section} />;
+    case "hero":
+      return <HeroSection section={section} />;
+    case "features":
+      return <FeaturesSection section={section} />;
+    case "pricing":
+      return <PricingSection section={section} />;
+    case "testimonials":
+      return <TestimonialsSection section={section} />;
+    case "stats":
+      return <StatsSection section={section} />;
+    case "form":
+      return <FormSection section={section} />;
+    case "gallery":
+      return <GallerySection section={section} />;
+    case "cta":
+      return <CtaSection section={section} />;
+    case "footer":
+      return <FooterSection section={section} />;
+    default:
+      return <Intro section={section} />;
+  }
+}
+
+function NavSection({ section }: { section: PaletteSection }) {
+  return (
+    <nav className="demo-nav">
+      <strong>{section.title}</strong>
+      <div>{(section.links ?? []).map((link) => <a href={link.href ?? "#"} key={link.label}>{link.label}</a>)}</div>
+      {section.actions?.[0] ? <a href={section.actions[0].href ?? "#"}>{section.actions[0].label}</a> : null}
+    </nav>
+  );
+}
+
+function HeroSection({ section }: { section: PaletteSection }) {
+  const primary = section.actions?.[0];
+  const secondary = section.actions?.[1]?.label;
+  return (
+    <div className="demo-hero" style={accentStyle()}>
+      <div className="hero-copy">
+        {section.eyebrow ? <span className="section-eyebrow">{section.eyebrow}</span> : null}
+        <h1>{section.title}</h1>
+        {section.subtitle ? <p>{section.subtitle}</p> : null}
+        {section.hasWaitlist ? <InlineWaitlist section={section} /> : <div className="hero-actions">{primary ? <a href={primary.href ?? "#"}>{primary.label}</a> : null}{secondary ? <span>{secondary}</span> : null}</div>}
+      </div>
+      <div className="coffee-study" aria-hidden="true" />
+    </div>
+  );
+}
+
+function InlineWaitlist({ section }: { section: PaletteSection }) {
+  return (
+    <form className="waitlist-form" onSubmit={preventSubmit}>
+      <label htmlFor={\`\${section.id}-email\`}>Reserve a tasting</label>
+      <div><input id={\`\${section.id}-email\`} name="email" type="email" placeholder="name@studio.com" /><button type="submit">Set</button></div>
+    </form>
+  );
+}
+
+function FeaturesSection({ section }: { section: PaletteSection }) {
+  const features = section.features ?? [];
+  return (
+    <div className="demo-features">
+      <Intro section={section} />
+      <div className="feature-list">{features.map((item, index) => <article key={item.title}><span style={{ background: item.accent ?? swatchColors[index % Math.max(swatchColors.length, 1)] ?? undefined }} /><h3>{item.title}</h3><p>{item.copy}</p></article>)}</div>
+    </div>
+  );
+}
+
+function PricingSection({ section }: { section: PaletteSection }) {
+  return (
+    <div className="demo-pricing">
+      <Intro section={section} />
+      <div className="pricing-list">{(section.plans ?? []).map((plan) => <article className={plan.featured ? "is-featured" : undefined} key={plan.name}><h3>{plan.name}</h3><strong>{plan.price}</strong><p>{plan.copy}</p></article>)}</div>
+    </div>
+  );
+}
+
+function TestimonialsSection({ section }: { section: PaletteSection }) {
+  return (
+    <div className="demo-features demo-testimonials">
+      <Intro section={section} />
+      <div className="feature-list testimonial-list">{(section.testimonials ?? []).map((item) => <article key={item.name}><span /><p>{item.quote}</p><h3>{item.name}</h3>{item.role ? <p>{item.role}</p> : null}</article>)}</div>
+    </div>
+  );
+}
+
+function StatsSection({ section }: { section: PaletteSection }) {
+  return (
+    <div className="demo-features demo-stats">
+      <Intro section={section} />
+      <div className="feature-list stat-list">{(section.stats ?? []).map((item) => <article key={item.label}><span /><strong>{item.value}</strong><p>{item.label}</p></article>)}</div>
+    </div>
+  );
+}
+
+function FormSection({ section }: { section: PaletteSection }) {
+  return (
+    <div className="demo-pricing demo-form">
+      <Intro section={section} />
+      <form className="waitlist-form section-form" onSubmit={preventSubmit}>
+        {(section.fields ?? []).map((field) => <label htmlFor={\`\${section.id}-\${field.id}\`} key={field.id}>{field.label}<input id={\`\${section.id}-\${field.id}\`} name={field.id} type={field.type ?? "text"} placeholder={field.placeholder} /></label>)}
+        <button type="submit">{section.actions?.[0]?.label ?? "Submit"}</button>
+      </form>
+    </div>
+  );
+}
+
+function GallerySection({ section }: { section: PaletteSection }) {
+  return (
+    <div className="demo-features demo-gallery">
+      <Intro section={section} />
+      <div className="feature-list gallery-list">{(section.gallery ?? []).map((item) => <article key={item.title}><div className="swatch-image">{item.imageUrl ? <img src={item.imageUrl} alt={item.imageAlt ?? item.title} /> : <span />}</div><h3>{item.title}</h3>{item.copy ? <p>{item.copy}</p> : null}</article>)}</div>
+    </div>
+  );
+}
+
+function CtaSection({ section }: { section: PaletteSection }) {
+  const action = section.actions?.[0];
+  return <div className="demo-cta" style={accentStyle()}><h2>{section.title}</h2>{section.subtitle ? <p>{section.subtitle}</p> : null}{action ? <a href={action.href ?? "#"}>{action.label}</a> : null}</div>;
+}
+
+function FooterSection({ section }: { section: PaletteSection }) {
+  return <footer className="demo-footer"><strong>{section.title}</strong><span>{section.footerText ?? section.subtitle}</span></footer>;
+}
+
+function Intro({ section }: { section: PaletteSection }) {
+  return <div>{section.eyebrow ? <span className="section-eyebrow">{section.eyebrow}</span> : null}<h2>{section.title}</h2>{section.subtitle ? <p>{section.subtitle}</p> : null}</div>;
+}
+
+function accentStyle() {
+  return swatchAccent ? { borderColor: swatchAccent } : undefined;
+}
+
+function preventSubmit(event: FormEvent<HTMLFormElement>) {
+  event.preventDefault();
+}
+`;
+}
+
+function navSection(title: string, links: { label: string }[], actionLabel = "Reserve"): PaletteSectionModel {
+  return {
+    id: uniqueId("nav"),
+    kind: "nav",
+    title,
+    links,
+    actions: [{ label: actionLabel }],
+    variant: "atelier",
+  };
+}
+
+function heroSection(
+  title: string,
+  subtitle: string,
+  actionLabel: string,
+  secondaryLabel: string,
+): PaletteSectionModel {
+  return {
+    id: "hero",
+    kind: "hero",
+    title,
+    subtitle,
+    actions: [{ label: actionLabel }, { label: secondaryLabel }],
+    variant: "atelier",
+  };
+}
+
+function featuresSection(title: string, subtitle: string): PaletteSectionModel {
+  return {
+    id: uniqueId("features"),
+    kind: "features",
+    title,
+    subtitle,
+    variant: "atelier",
+  };
+}
+
+function pricingSection(): PaletteSectionModel {
+  return {
+    id: uniqueId("pricing"),
+    kind: "pricing",
+    title: "Simple cups, clear plans",
+    subtitle: "No app maze. Walk in, tap once, leave with a perfect cup.",
+    variant: "atelier",
+  };
+}
+
+function testimonialsSection(): PaletteSectionModel {
+  return {
+    id: uniqueId("testimonials"),
+    kind: "testimonials",
+    title: "Studio notes",
+    subtitle: "Generated notes that show how the canvas responds to steering.",
+    variant: "atelier",
+  };
+}
+
+function statsSection(): PaletteSectionModel {
+  return {
+    id: uniqueId("stats"),
+    kind: "stats",
+    title: "A faster first draft",
+    subtitle: "Small, visible operations replace waiting on one giant generation.",
+    variant: "atelier",
+  };
+}
+
+function gallerySection(): PaletteSectionModel {
+  return {
+    id: uniqueId("gallery"),
+    kind: "gallery",
+    title: "Reference studies",
+    subtitle: "Pinned swatches become visual direction on the canvas.",
+    variant: "atelier",
+  };
+}
+
+function formSection(title = "Reserve a tasting", subtitle = "Leave a note and Palette keeps the flow in place."): PaletteSectionModel {
+  return {
+    id: uniqueId("form"),
+    kind: "form",
+    title,
+    subtitle,
+    actions: [{ label: "Send note" }],
+    variant: "atelier",
+  };
+}
+
+function ctaSection(title: string, subtitle: string): PaletteSectionModel {
+  return {
+    id: uniqueId("cta"),
+    kind: "cta",
+    title,
+    subtitle,
+    actions: [{ label: "Set the paint" }],
+    variant: "atelier",
+  };
+}
+
+function footerSection(title: string, footerText: string): PaletteSectionModel {
+  return {
+    id: uniqueId("footer"),
+    kind: "footer",
+    title,
+    footerText,
+    variant: "atelier",
+  };
+}
+
+function firstSectionId(project: PaletteProject, kind: PaletteSectionKind): string | undefined {
+  return project.sections.find((section) => section.kind === kind)?.id;
+}
+
+function insertSection(sections: PaletteSectionModel[], section: PaletteSectionModel, afterId?: string) {
+  const copy = [...sections];
+  const index = afterId ? copy.findIndex((item) => item.id === afterId) : -1;
+  if (index === -1) return [...copy, ensureUniqueSection(section, copy)];
+  copy.splice(index + 1, 0, ensureUniqueSection(section, copy));
+  return copy;
+}
+
+function ensureUniqueSection(section: PaletteSectionModel, sections: PaletteSectionModel[]) {
+  if (!sections.some((item) => item.id === section.id)) return section;
+  return { ...section, id: uniqueId(section.kind) };
+}
+
+function moveSection(sections: PaletteSectionModel[], id: string, direction: -1 | 1) {
+  const index = sections.findIndex((section) => section.id === id);
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= sections.length) return sections;
+  const copy = [...sections];
+  const [section] = copy.splice(index, 1);
+  copy.splice(nextIndex, 0, section);
+  return copy;
+}
+
+function commit(
+  project: PaletteProject,
+  snapshot: PaletteSnapshot,
+  label: string,
+  detail: string,
+): OperationResult {
+  return {
+    project: {
+      ...project,
+      brushLog: [logEntry(label, detail), ...project.brushLog].slice(0, 8),
+      past: [...project.past, snapshot],
+      future: [],
+    },
+    status: detail,
+  };
+}
+
+function takeSnapshot(project: PaletteProject): PaletteSnapshot {
+  return {
+    theme: project.theme,
+    sections: clone(project.sections),
+    swatches: clone(project.swatches),
+    brushLog: clone(project.brushLog),
+  };
+}
+
+function cloneProject(project: PaletteProject): PaletteProject {
+  return {
+    ...project,
+    sections: clone(project.sections),
+    swatches: clone(project.swatches),
+    brushLog: clone(project.brushLog),
+    past: [...project.past],
+    future: [...project.future],
+  };
+}
+
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function logEntry(label: string, detail: string): BrushLogEntry {
+  return { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, label, detail };
+}
+
+function uniqueId(kind: string): string {
+  return `${kind}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function toTitle(value: string): string {
+  const cleaned = value.replace(/make|change|to|:/gi, " ").replace(/\s+/g, " ").trim();
+  return cleaned.length > 0 ? cleaned : "A freshly painted section.";
+}

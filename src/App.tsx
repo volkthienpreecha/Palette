@@ -1,247 +1,163 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  ArrowDown,
-  ArrowUp,
   Brush,
+  Download,
   ImagePlus,
   Mic,
   Pause,
   Play,
+  Redo2,
+  RotateCcw,
   Scissors,
   Send,
-  Trash2,
 } from "lucide-react";
+import {
+  PaletteSectionView,
+  type PaletteSectionModel,
+} from "./sectionRenderers";
+import {
+  applyOperation,
+  createBlankProject,
+  createProjectFromTemplate,
+  parseIntent,
+  paintingStageLabels,
+  redoProject,
+  sectionStatus,
+  undoProject,
+  type PaletteOperation,
+  type PaletteProject,
+  type PaletteSwatch,
+} from "./paletteModel";
 
 type Phase = "idle" | "interview" | "painting" | "paused" | "done";
-type Theme = "atelier" | "premium";
-type SectionKind = "nav" | "hero" | "features" | "pricing" | "cta" | "footer";
-
-type CanvasSection = {
-  id: string;
-  kind: SectionKind;
-  title: string;
-  subtitle?: string;
-  variant?: "atelier" | "premium" | "playful";
-  hasWaitlist?: boolean;
-};
-
-type Swatch = {
-  id: string;
-  title: string;
-  note: string;
-  url?: string;
-  tone?: "paper" | "glass" | "ink";
-};
-
-type PaintStep = {
-  label: string;
-  status: string;
-  section?: CanvasSection;
-};
+type ProjectTemplate = "robot-coffee" | "portfolio" | "studio-saas";
+type ProjectMood = "atelier" | "premium";
 
 const initialStroke = "Build a landing page for a robot coffee shop.";
 
-const paintSteps: PaintStep[] = [
-  {
-    label: "Prime canvas",
-    status: "Priming the canvas with a warm studio surface.",
-  },
-  {
-    label: "Mix swatches",
-    status: "Mixing glass, graphite, and a small cobalt accent.",
-  },
-  {
-    label: "Paint navigation",
-    status: "Painting the navigation as the first visible line.",
-    section: {
-      id: "nav",
-      kind: "nav",
-      title: "Rivet & Roast",
-      subtitle: "Queue, menu, studio",
-      variant: "atelier",
-    },
-  },
-  {
-    label: "Lay first wash",
-    status: "Laying the hero section in one clean wash.",
-    section: {
-      id: "hero",
-      kind: "hero",
-      title: "Coffee pulled by robots, served with studio calm.",
-      subtitle:
-        "A small autonomous cafe where every pour is measured, warm, and ready before the morning rush reaches the door.",
-      variant: "atelier",
-    },
-  },
-  {
-    label: "Paint details",
-    status: "Adding the reasons this place feels worth visiting.",
-    section: {
-      id: "features",
-      kind: "features",
-      title: "Three strokes of service",
-      subtitle: "Fast enough for commuters, quiet enough for regulars.",
-      variant: "atelier",
-    },
-  },
-  {
-    label: "Frame pricing",
-    status: "Framing the pricing table before the paint sets.",
-    section: {
-      id: "pricing",
-      kind: "pricing",
-      title: "Simple cups, clear plans",
-      subtitle: "No app maze. Walk in, tap once, leave with a perfect cup.",
-      variant: "atelier",
-    },
-  },
-  {
-    label: "Varnish",
-    status: "Varnishing the final call to action and footer.",
-    section: {
-      id: "cta",
-      kind: "cta",
-      title: "Join the first morning tasting.",
-      subtitle:
-        "Palette can still steer this surface while Codex keeps the canvas alive.",
-      variant: "atelier",
-    },
-  },
-  {
-    label: "Set paint",
-    status: "Setting the canvas so every section can still be steered.",
-    section: {
-      id: "footer",
-      kind: "footer",
-      title: "Rivet & Roast",
-      subtitle: "Painted live with Palette.",
-      variant: "atelier",
-    },
-  },
-];
-
-const defaultSwatches: Swatch[] = [
-  {
-    id: "glass",
-    title: "Liquid glass",
-    note: "Approved button material for active controls.",
-    tone: "glass",
-  },
-  {
-    id: "paper",
-    title: "Atelier paper",
-    note: "Warm canvas, graphite ink, sparse pigment.",
-    tone: "paper",
-  },
-];
-
 const phaseCopy: Record<Phase, string> = {
-  idle: "Canvas is clean. Press Ctrl K and speak the first brushstroke.",
+  idle: "Canvas is clean. Press Ctrl K and place the first brushstroke.",
   interview: "One studio question before the first wash.",
-  painting: "Codex is painting in layers. Press Esc to interrupt.",
+  painting: "Palette is painting in layers. Press Esc to interrupt.",
   paused: "Brush lifted. Steer the surface before it sets.",
   done: "Canvas set. Select any section to keep steering.",
 };
 
 function App() {
+  const [project, setProject] = useState<PaletteProject>(() => createBlankProject());
   const [phase, setPhase] = useState<Phase>("idle");
-  const [theme, setTheme] = useState<Theme>("atelier");
-  const [sections, setSections] = useState<CanvasSection[]>([]);
   const [activeStep, setActiveStep] = useState(0);
+  const [paintQueue, setPaintQueue] = useState<PaletteSectionModel[]>([]);
+  const [pendingTemplate, setPendingTemplate] = useState<ProjectTemplate>("robot-coffee");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [capsuleOpen, setCapsuleOpen] = useState(false);
   const [draft, setDraft] = useState(initialStroke);
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState(phaseCopy.idle);
-  const [swatches, setSwatches] = useState<Swatch[]>(defaultSwatches);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const selectedSection = sections.find((section) => section.id === selectedId);
+  const selectedSection = project.sections.find((section) => section.id === selectedId);
 
   const openCommandCapsule = useCallback(() => {
     setCapsuleOpen(true);
   }, []);
 
-  const beginPainting = useCallback(() => {
-    setSections([]);
-    setSelectedId(null);
-    setTheme("atelier");
-    setActiveStep(0);
-    setPhase("painting");
-    setStatus("The first wash is starting.");
+  const replaceProjectForPainting = useCallback(
+    (template: ProjectTemplate, mood: ProjectMood) => {
+      const nextProject = createProjectFromTemplate(template);
+      nextProject.swatches = project.swatches;
+      nextProject.swatchAccent = project.swatchAccent;
+      nextProject.swatchColors = project.swatchColors;
+      nextProject.theme = mood;
+      nextProject.sections = nextProject.sections.map((section) => ({
+        ...section,
+        variant: section.variant === "playful" ? "playful" : mood,
+      }));
+      setProject({ ...nextProject, sections: [] });
+      setPaintQueue(nextProject.sections);
+      setSelectedId(null);
+      setActiveStep(0);
+      setPhase("painting");
+      setStatus("The first wash is starting.");
+    },
+    [project.swatches, project.swatchAccent, project.swatchColors],
+  );
+
+  const applyOneOperation = useCallback((operation: PaletteOperation) => {
+    let exportText: string | undefined;
+    setProject((current) => {
+      const result = applyOperation(current, operation);
+      exportText = result.project.exportText;
+      setStatus(result.status);
+      return result.project;
+    });
+    return exportText;
   }, []);
+
+  const applyOperations = useCallback((operations: PaletteOperation[]) => {
+    let next = project;
+    let finalStatus = "";
+    let exportText: string | undefined;
+
+    for (const operation of operations) {
+      const result = applyOperation(next, operation);
+      next = result.project;
+      finalStatus = result.status;
+      exportText = result.project.exportText;
+    }
+
+    setProject(next);
+    if (finalStatus) setStatus(finalStatus);
+    if (exportText) downloadExport(exportText);
+  }, [project]);
 
   const applyDirection = useCallback(
     (raw: string) => {
-      const command = raw.trim().toLowerCase();
-      if (!command) return;
+      const result = parseIntent(raw, { project, selectedId });
+      const startProject = result.operations.find(
+        (operation): operation is Extract<PaletteOperation, { type: "start_project" }> =>
+          operation.type === "start_project",
+      );
 
-      if (command.includes("robot coffee") || command.includes("landing page")) {
+      if (startProject) {
+        setPendingTemplate(startProject.template);
         setCapsuleOpen(false);
         setPhase("interview");
-        setStatus("Palette needs one studio direction before painting.");
+        setStatus(result.status);
         return;
       }
 
-      if (
-        command.includes("darker") ||
-        command.includes("premium") ||
-        command.includes("apple")
-      ) {
-        setTheme("premium");
-        setSections((current) =>
-          current.map((section) => ({
-            ...section,
-            variant: section.variant === "playful" ? "playful" : "premium",
-          })),
+      if (result.operations.length > 0) {
+        const premiumTheme = result.operations.some(
+          (operation) => operation.type === "set_theme" && operation.theme === "premium",
         );
-        setPhase((current) => (current === "paused" ? "painting" : current));
-        setStatus("Mixed a darker glaze and tightened the whole surface.");
-        setCapsuleOpen(false);
-        return;
-      }
-
-      if (command.includes("waitlist") || command.includes("form")) {
-        setSections((current) =>
-          current.map((section) =>
-            section.id === (selectedId ?? "hero") || section.kind === "hero"
-              ? { ...section, hasWaitlist: true, variant: theme === "premium" ? "premium" : section.variant }
-              : section,
-          ),
+        const atelierTheme = result.operations.some(
+          (operation) => operation.type === "set_theme" && operation.theme === "atelier",
         );
-        setSelectedId("hero");
-        setStatus("Painted a waitlist form directly into the selected hero.");
-        setCapsuleOpen(false);
-        return;
-      }
 
-      if (command.includes("playful")) {
-        const targetId = selectedId ?? "features";
-        setSections((current) =>
-          current.map((section) =>
-            section.id === targetId ? { ...section, variant: "playful" } : section,
-          ),
-        );
-        setStatus("Changed only the selected section, not the whole page.");
-        setCapsuleOpen(false);
-        return;
-      }
-
-      if (command.includes("delete") || command.includes("remove")) {
-        if (selectedId) {
-          setSections((current) => current.filter((section) => section.id !== selectedId));
-          setStatus("Removed the selected section from the canvas.");
-          setSelectedId(null);
+        if (premiumTheme || atelierTheme) {
+          setPaintQueue((current) =>
+            current.map((section) => ({
+              ...section,
+              variant:
+                section.variant === "playful"
+                  ? "playful"
+                  : premiumTheme
+                    ? "premium"
+                    : "atelier",
+            })),
+          );
         }
-        setCapsuleOpen(false);
-        return;
-      }
 
-      setStatus("Palette saved that as the next brush note for the selected area.");
+        applyOperations(result.operations);
+        if (phase === "paused") setPhase("painting");
+      } else {
+        setStatus(result.status);
+      }
       setCapsuleOpen(false);
     },
-    [selectedId, theme],
+    [applyOperations, phase, project, selectedId],
   );
 
   const interruptPainting = useCallback(() => {
@@ -254,71 +170,92 @@ function App() {
 
   const removeSelected = useCallback(() => {
     if (!selectedId) return;
-    setSections((current) => current.filter((section) => section.id !== selectedId));
+    applyOneOperation({ type: "remove_section", id: selectedId });
     setSelectedId(null);
-    setStatus("Removed the selected section.");
-  }, [selectedId]);
+  }, [applyOneOperation, selectedId]);
 
   const moveSelected = useCallback(
-    (direction: -1 | 1) => {
-      if (!selectedId) return;
-      setSections((current) => {
-        const index = current.findIndex((section) => section.id === selectedId);
-        const nextIndex = index + direction;
-        if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
-        const copy = [...current];
-        const [section] = copy.splice(index, 1);
-        copy.splice(nextIndex, 0, section);
-        return copy;
-      });
-      setStatus("Moved the selected section on the canvas.");
+    (id: string, direction: -1 | 1) => {
+      applyOneOperation({ type: "move_section", id, direction });
+      setSelectedId(id);
     },
-    [selectedId],
+    [applyOneOperation],
   );
 
-  const addFiles = useCallback((files: FileList | File[]) => {
-    const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
-    if (imageFiles.length === 0) return;
-    setSwatches((current) => [
-      ...imageFiles.map((file, index) => ({
-        id: `${file.name}-${Date.now()}-${index}`,
-        title: file.name.replace(/\.[^.]+$/, "") || "Reference",
-        note: "Pinned visual reference.",
-        url: URL.createObjectURL(file),
-      })),
-      ...current,
-    ]);
-    setStatus("Pinned the image as a reference swatch.");
+  const undo = useCallback(() => {
+    setProject((current) => {
+      const result = undoProject(current);
+      setStatus(result.status);
+      return result.project;
+    });
   }, []);
+
+  const redo = useCallback(() => {
+    setProject((current) => {
+      const result = redoProject(current);
+      setStatus(result.status);
+      return result.project;
+    });
+  }, []);
+
+  const setPaint = useCallback(() => {
+    const result = applyOperation(project, { type: "export_project" });
+    setProject(result.project);
+    setStatus(result.status);
+    if (result.project.exportText) downloadExport(result.project.exportText);
+  }, [project]);
+
+  const addFiles = useCallback(
+    (files: FileList | File[]) => {
+      const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
+      if (imageFiles.length === 0) return;
+
+      for (const file of imageFiles) {
+        const url = URL.createObjectURL(file);
+        extractColors(url).then((colors) => {
+          const swatch: PaletteSwatch = {
+            id: `${file.name}-${Date.now()}`,
+            title: file.name.replace(/\.[^.]+$/, "") || "Reference",
+            note: colors.length
+              ? `Mixed ${colors.slice(0, 2).join(" and ")} from this reference.`
+              : "Pinned visual reference.",
+            url,
+            colors,
+          };
+          applyOneOperation({ type: "add_swatch", swatch });
+        });
+      }
+    },
+    [applyOneOperation],
+  );
 
   useEffect(() => {
     if (phase !== "painting") return;
 
-    if (activeStep >= paintSteps.length) {
+    if (activeStep >= paintQueue.length + 2) {
       setPhase("done");
       setStatus("Canvas set. Keep selecting sections to steer.");
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      const step = paintSteps[activeStep];
-      setStatus(step.status);
-      if (step.section) {
-        const stepSection = step.section;
-        setSections((current) => {
-          if (current.some((section) => section.id === stepSection.id)) return current;
-          const section: CanvasSection = {
-            ...stepSection,
-            variant: theme === "premium" ? "premium" : stepSection.variant,
-          };
-          return [...current, section];
-        });
+      if (activeStep === 0) {
+        setStatus("Priming the canvas with a warm studio surface.");
+      } else if (activeStep === 1) {
+        setStatus("Mixing swatches into a controlled component model.");
+      } else {
+        const sectionIndex = activeStep - 2;
+        const section = paintQueue[sectionIndex];
+        if (section) {
+          setStatus(sectionStatus(section, sectionIndex));
+          applyOneOperation({ type: "add_section", section });
+        }
       }
       setActiveStep((current) => current + 1);
-    }, activeStep < 2 ? 520 : 980);
+    }, activeStep < 2 ? 520 : 920);
 
     return () => window.clearTimeout(timeout);
-  }, [activeStep, phase, theme]);
+  }, [activeStep, applyOneOperation, paintQueue, phase]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -328,6 +265,19 @@ function App() {
         openCommandCapsule();
         return;
       }
+
+      if ((event.metaKey || event.ctrlKey) && key === "z") {
+        event.preventDefault();
+        undo();
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && (key === "y" || (event.shiftKey && key === "z"))) {
+        event.preventDefault();
+        redo();
+        return;
+      }
+
       if (event.key === "Escape") {
         if (phase === "painting") {
           event.preventDefault();
@@ -337,6 +287,7 @@ function App() {
         }
         return;
       }
+
       if (event.key === "Delete") {
         const target = event.target;
         const isTextTarget =
@@ -353,7 +304,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [capsuleOpen, interruptPainting, openCommandCapsule, phase, removeSelected, selectedId]);
+  }, [capsuleOpen, interruptPainting, openCommandCapsule, phase, redo, removeSelected, selectedId, undo]);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -365,13 +316,17 @@ function App() {
     return () => window.removeEventListener("paste", onPaste);
   }, [addFiles]);
 
+  const shellStyle = project.swatchAccent
+    ? ({ "--swatch-accent": project.swatchAccent } as CSSProperties)
+    : undefined;
+
   return (
-    <main className={`app-shell theme-${theme}`}>
+    <main className={`app-shell theme-${project.theme}`} style={shellStyle}>
       <div className="atelier-wash" aria-hidden="true" />
       <header className="studio-header">
         <div>
           <p className="studio-mark">Palette</p>
-          <h1>Paint software with Codex.</h1>
+          <h1>Paint software into code.</h1>
         </div>
         <div className="header-actions">
           <button className="glass-button muted" type="button" onClick={openCommandCapsule}>
@@ -380,21 +335,24 @@ function App() {
           </button>
           <button className="glass-button" type="button" onClick={openCommandCapsule}>
             <Play size={16} />
-            <span>Start with voice</span>
+            <span>Start stroke</span>
           </button>
         </div>
       </header>
 
       <section className="studio-grid">
         <ReferenceSwatches
-          swatches={swatches}
+          project={project}
           onFiles={addFiles}
           onPickFiles={() => fileInputRef.current?.click()}
+          onUndo={undo}
+          onRedo={redo}
+          onSetPaint={setPaint}
         />
 
         <section className="canvas-zone" aria-label="Palette canvas">
           <CorgiGuide phase={phase} status={status} />
-          <StatusRail activeStep={activeStep} phase={phase} />
+          <StatusRail activeStep={activeStep} totalSections={paintQueue.length} phase={phase} />
 
           <div
             className={`canvas-board ${phase === "painting" ? "is-painting" : ""}`}
@@ -405,7 +363,7 @@ function App() {
             }}
           >
             <AnimatePresence mode="popLayout">
-              {phase === "idle" && sections.length === 0 ? (
+              {phase === "idle" && project.sections.length === 0 ? (
                 <motion.div
                   className="blank-canvas"
                   key="blank"
@@ -418,7 +376,7 @@ function App() {
                   </div>
                   <h2>A clean canvas.</h2>
                   <p>
-                    Press Ctrl K, speak the first brushstroke, then interrupt while Codex paints.
+                    Press Ctrl K, place the first brushstroke, then interrupt while the canvas paints.
                   </p>
                   <button className="primary-stroke" type="button" onClick={openCommandCapsule}>
                     Begin with a brushstroke
@@ -437,10 +395,10 @@ function App() {
                   <span>Prime the canvas</span>
                   <h2>Should this feel playful, premium, or cozy?</h2>
                   <div className="interview-options">
-                    <button type="button" onClick={beginPainting}>
+                    <button type="button" onClick={() => replaceProjectForPainting(pendingTemplate, "premium")}>
                       Premium, but still charming
                     </button>
-                    <button type="button" onClick={beginPainting}>
+                    <button type="button" onClick={() => replaceProjectForPainting(pendingTemplate, "atelier")}>
                       Quiet and editorial
                     </button>
                   </div>
@@ -448,14 +406,18 @@ function App() {
               ) : null}
             </AnimatePresence>
 
-            {sections.length > 0 ? (
+            {project.sections.length > 0 ? (
               <GeneratedPage
-                sections={sections}
-                theme={theme}
+                sections={project.sections}
+                theme={project.theme}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onMove={moveSelected}
-                onRemove={removeSelected}
+                onRemove={(id) => {
+                  applyOneOperation({ type: "remove_section", id });
+                  setSelectedId(null);
+                }}
+                onSetPaint={setPaint}
               />
             ) : null}
           </div>
@@ -504,13 +466,19 @@ function App() {
 }
 
 function ReferenceSwatches({
-  swatches,
+  project,
   onFiles,
   onPickFiles,
+  onUndo,
+  onRedo,
+  onSetPaint,
 }: {
-  swatches: Swatch[];
+  project: PaletteProject;
   onFiles: (files: FileList | File[]) => void;
   onPickFiles: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  onSetPaint: () => void;
 }) {
   return (
     <aside className="swatch-panel">
@@ -518,6 +486,20 @@ function ReferenceSwatches({
         <span>Swatches</span>
         <button type="button" title="Add image swatch" onClick={onPickFiles}>
           <ImagePlus size={16} />
+        </button>
+      </div>
+      <div className="studio-actions">
+        <button type="button" onClick={onUndo} disabled={project.past.length === 0}>
+          <RotateCcw size={14} />
+          Undo
+        </button>
+        <button type="button" onClick={onRedo} disabled={project.future.length === 0}>
+          <Redo2 size={14} />
+          Redo
+        </button>
+        <button type="button" onClick={onSetPaint}>
+          <Download size={14} />
+          Set paint
         </button>
       </div>
       <div
@@ -531,9 +513,16 @@ function ReferenceSwatches({
         Drop or paste references
       </div>
       <div className="swatch-list">
-        {swatches.map((swatch) => (
+        {project.swatches.map((swatch) => (
           <article className={`swatch-card tone-${swatch.tone ?? "paper"}`} key={swatch.id}>
-            <div className="swatch-image">
+            <div
+              className="swatch-image"
+              style={
+                swatch.colors?.length
+                  ? { background: `linear-gradient(135deg, ${swatch.colors.join(", ")})` }
+                  : undefined
+              }
+            >
               {swatch.url ? <img src={swatch.url} alt="" /> : <span />}
             </div>
             <h3>{swatch.title}</h3>
@@ -541,7 +530,22 @@ function ReferenceSwatches({
           </article>
         ))}
       </div>
+      <BrushLog project={project} />
     </aside>
+  );
+}
+
+function BrushLog({ project }: { project: PaletteProject }) {
+  return (
+    <section className="brush-log" aria-label="Brush log">
+      <h2>Brush log</h2>
+      {project.brushLog.slice(0, 5).map((entry) => (
+        <article key={entry.id}>
+          <strong>{entry.label}</strong>
+          <p>{entry.detail}</p>
+        </article>
+      ))}
+    </section>
   );
 }
 
@@ -557,15 +561,28 @@ function CorgiGuide({ phase, status }: { phase: Phase; status: string }) {
   );
 }
 
-function StatusRail({ activeStep, phase }: { activeStep: number; phase: Phase }) {
+function StatusRail({
+  activeStep,
+  totalSections,
+  phase,
+}: {
+  activeStep: number;
+  totalSections: number;
+  phase: Phase;
+}) {
+  const visibleLabels =
+    totalSections > 0
+      ? paintingStageLabels
+      : ["Prime canvas", "Mix swatches", "Paint navigation", "Lay first wash", "Paint details"];
+
   return (
     <ol className="status-rail" aria-label="Painting progress">
-      {paintSteps.map((step, index) => {
+      {visibleLabels.map((label, index) => {
         const state = phase === "done" || index < activeStep ? "done" : index === activeStep ? "active" : "";
         return (
-          <li className={state} key={step.label}>
+          <li className={state} key={label}>
             <span />
-            {step.label}
+            {label}
           </li>
         );
       })}
@@ -580,13 +597,15 @@ function GeneratedPage({
   onSelect,
   onMove,
   onRemove,
+  onSetPaint,
 }: {
-  sections: CanvasSection[];
-  theme: Theme;
+  sections: PaletteSectionModel[];
+  theme: string;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onMove: (direction: -1 | 1) => void;
-  onRemove: () => void;
+  onMove: (id: string, direction: -1 | 1) => void;
+  onRemove: (id: string) => void;
+  onSetPaint: () => void;
 }) {
   return (
     <motion.div
@@ -597,180 +616,31 @@ function GeneratedPage({
     >
       <AnimatePresence initial={false}>
         {sections.map((section) => (
-          <SelectableSection
+          <motion.div
+            className="section-motion-shell"
             key={section.id}
-            section={section}
-            selected={selectedId === section.id}
-            onSelect={() => onSelect(section.id)}
-            onMove={onMove}
-            onRemove={onRemove}
-          />
+            layout
+            initial={{ opacity: 0, filter: "blur(12px)", y: 22 }}
+            animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+            exit={{ opacity: 0, filter: "blur(10px)", y: -16 }}
+            transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <PaletteSectionView
+              section={section}
+              helpers={{
+                selected: selectedId === section.id,
+                onSelect,
+                onMove,
+                onRemove,
+                onAction: (_section, action) => {
+                  if (action.label.toLowerCase().includes("set")) onSetPaint();
+                },
+              }}
+            />
+          </motion.div>
         ))}
       </AnimatePresence>
     </motion.div>
-  );
-}
-
-function SelectableSection({
-  section,
-  selected,
-  onSelect,
-  onMove,
-  onRemove,
-}: {
-  section: CanvasSection;
-  selected: boolean;
-  onSelect: () => void;
-  onMove: (direction: -1 | 1) => void;
-  onRemove: () => void;
-}) {
-  return (
-    <motion.section
-      layout
-      className={`generated-section section-${section.kind} variant-${section.variant ?? "atelier"} ${
-        selected ? "is-selected" : ""
-      }`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
-      initial={{ opacity: 0, filter: "blur(12px)", y: 22 }}
-      animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-      exit={{ opacity: 0, filter: "blur(10px)", y: -16 }}
-      transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-    >
-      {selected ? (
-        <div className="brush-toolbar" onClick={(event) => event.stopPropagation()}>
-          <button type="button" title="Move up" onClick={() => onMove(-1)}>
-            <ArrowUp size={14} />
-          </button>
-          <button type="button" title="Move down" onClick={() => onMove(1)}>
-            <ArrowDown size={14} />
-          </button>
-          <button type="button" title="Remove" onClick={onRemove}>
-            <Trash2 size={14} />
-          </button>
-        </div>
-      ) : null}
-      <SectionBody section={section} />
-    </motion.section>
-  );
-}
-
-function SectionBody({ section }: { section: CanvasSection }) {
-  if (section.kind === "nav") {
-    return (
-      <nav className="demo-nav">
-        <strong>{section.title}</strong>
-        <div>
-          <a>Menu</a>
-          <a>Robots</a>
-          <a>Visit</a>
-        </div>
-        <button type="button">Reserve</button>
-      </nav>
-    );
-  }
-
-  if (section.kind === "hero") {
-    return (
-      <div className="demo-hero">
-        <div className="hero-copy">
-          <h2>{section.title}</h2>
-          <p>{section.subtitle}</p>
-          {!section.hasWaitlist ? (
-            <div className="hero-actions">
-              <button type="button">Join waitlist</button>
-              <span>First tasting opens at 7:30 AM</span>
-            </div>
-          ) : null}
-          {section.hasWaitlist ? (
-            <form className="waitlist-form">
-              <label htmlFor="waitlist-email">Reserve a tasting</label>
-              <div>
-                <input id="waitlist-email" type="email" placeholder="name@studio.com" />
-                <button type="button">Set</button>
-              </div>
-            </form>
-          ) : null}
-        </div>
-        <div className="coffee-study" aria-hidden="true">
-          <div className="robot-arm" />
-          <div className="cup">
-            <span />
-          </div>
-          <div className="steam steam-one" />
-          <div className="steam steam-two" />
-        </div>
-      </div>
-    );
-  }
-
-  if (section.kind === "features") {
-    const items = [
-      ["Measured pour", "Robotic arms tune grind, heat, and timing for each order."],
-      ["Human calm", "The room stays quiet, tactile, and easy to understand."],
-      ["Morning memory", "Regular orders reappear before the line reaches the counter."],
-    ];
-    return (
-      <div className="demo-features">
-        <div>
-          <h2>{section.title}</h2>
-          <p>{section.subtitle}</p>
-        </div>
-        <div className="feature-list">
-          {items.map(([title, copy]) => (
-            <article key={title}>
-              <span />
-              <h3>{title}</h3>
-              <p>{copy}</p>
-            </article>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (section.kind === "pricing") {
-    const plans = [
-      ["Morning", "$6", "Single cup, timed pickup."],
-      ["Studio", "$18", "Three cups across a work block."],
-      ["Foundry", "$42", "Team tasting tray and notes."],
-    ];
-    return (
-      <div className="demo-pricing">
-        <div>
-          <h2>{section.title}</h2>
-          <p>{section.subtitle}</p>
-        </div>
-        <div className="pricing-list">
-          {plans.map(([name, price, copy]) => (
-            <article key={name}>
-              <h3>{name}</h3>
-              <strong>{price}</strong>
-              <p>{copy}</p>
-            </article>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (section.kind === "cta") {
-    return (
-      <div className="demo-cta">
-        <h2>{section.title}</h2>
-        <p>{section.subtitle}</p>
-        <button type="button">Set the paint</button>
-      </div>
-    );
-  }
-
-  return (
-    <footer className="demo-footer">
-      <strong>{section.title}</strong>
-      <span>{section.subtitle}</span>
-    </footer>
   );
 }
 
@@ -791,7 +661,7 @@ function CommandCapsule({
   open: boolean;
   draft: string;
   listening: boolean;
-  selectedSection?: CanvasSection;
+  selectedSection?: PaletteSectionModel;
   onOpen: () => void;
   onDraft: (value: string) => void;
   onClose: () => void;
@@ -824,7 +694,7 @@ function CommandCapsule({
           <div className="command-actions">
             <button className={listening ? "is-listening" : ""} type="button" onClick={onListen}>
               <Mic size={16} />
-              {listening ? "Listening" : "Speak"}
+              {listening ? "Filling" : "Demo stroke"}
             </button>
             {phase === "painting" ? (
               <button type="button" onClick={onInterrupt}>
@@ -847,6 +717,63 @@ function CommandCapsule({
       )}
     </div>
   );
+}
+
+function downloadExport(text: string) {
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "palette-project.json";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function extractColors(url: string): Promise<string[]> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      const size = 24;
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        resolve([]);
+        return;
+      }
+      context.drawImage(image, 0, 0, size, size);
+      const data = context.getImageData(0, 0, size, size).data;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let count = 0;
+      for (let index = 0; index < data.length; index += 16) {
+        r += data[index];
+        g += data[index + 1];
+        b += data[index + 2];
+        count += 1;
+      }
+      if (count === 0) {
+        resolve([]);
+        return;
+      }
+      const first = rgbToHex(Math.round(r / count), Math.round(g / count), Math.round(b / count));
+      const second = rgbToHex(
+        Math.max(24, Math.round(r / count) - 42),
+        Math.max(24, Math.round(g / count) - 32),
+        Math.max(24, Math.round(b / count) - 22),
+      );
+      resolve([first, second]);
+    };
+    image.onerror = () => resolve([]);
+    image.src = url;
+  });
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export default App;

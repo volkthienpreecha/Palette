@@ -11,6 +11,7 @@
   --charcoal: oklch(0.43 0.016 71);
   --line: oklch(0.78 0.022 76);
   --cobalt: oklch(0.48 0.126 250);
+  --swatch-accent: var(--cobalt);
   --cobalt-soft: oklch(0.91 0.034 249);
   --vermilion: oklch(0.58 0.15 35);
   --gold: oklch(0.71 0.09 82);
@@ -223,6 +224,42 @@ a {
   background: color-mix(in oklch, var(--paper) 58%, transparent);
 }
 
+.studio-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.studio-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid color-mix(in oklch, var(--line) 72%, transparent);
+  border-radius: 999px;
+  color: var(--ink);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, oklch(1 0 0) 24%, transparent), transparent 52%),
+    color-mix(in oklch, var(--paper) 58%, transparent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.studio-actions button:last-child {
+  grid-column: 1 / -1;
+  color: oklch(0.98 0.008 82);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, oklch(1 0 0) 22%, transparent), transparent 52%),
+    var(--glass-dark);
+}
+
+.studio-actions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .drop-target {
   min-height: 82px;
   display: grid;
@@ -241,9 +278,42 @@ a {
   display: grid;
   gap: 12px;
   margin-top: 14px;
-  max-height: calc(100% - 126px);
+  max-height: min(46vh, calc(100% - 316px));
   overflow: auto;
   padding-right: 2px;
+}
+
+.brush-log {
+  margin-top: 16px;
+  border-top: 1px solid color-mix(in oklch, var(--line) 54%, transparent);
+  padding-top: 14px;
+}
+
+.brush-log h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.brush-log article {
+  margin: 0 0 10px;
+  border: 1px solid color-mix(in oklch, var(--line) 54%, transparent);
+  border-radius: 12px;
+  padding: 10px;
+  background: color-mix(in oklch, var(--paper) 52%, transparent);
+}
+
+.brush-log strong {
+  display: block;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.brush-log p {
+  margin: 4px 0 0;
+  color: var(--charcoal);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .swatch-card {
@@ -351,7 +421,7 @@ a {
   background: linear-gradient(
     115deg,
     transparent 0%,
-    color-mix(in oklch, var(--cobalt) 16%, transparent) 32%,
+    color-mix(in oklch, var(--swatch-accent) 16%, transparent) 32%,
     color-mix(in oklch, var(--gold) 18%, transparent) 46%,
     transparent 64%
   );
@@ -461,15 +531,19 @@ a {
     background-color 160ms ease;
 }
 
+.section-motion-shell {
+  min-width: 0;
+}
+
 .generated-section:hover {
-  border-color: color-mix(in oklch, var(--cobalt) 38%, transparent);
+  border-color: color-mix(in oklch, var(--swatch-accent) 38%, transparent);
 }
 
 .generated-section.is-selected {
-  border-color: var(--cobalt);
+  border-color: color-mix(in oklch, var(--swatch-accent) 58%, var(--line));
   box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--cobalt) 18%, transparent),
-    0 16px 44px color-mix(in oklch, var(--cobalt) 14%, transparent);
+    0 0 0 3px color-mix(in oklch, var(--swatch-accent) 12%, transparent),
+    0 16px 44px color-mix(in oklch, var(--swatch-accent) 9%, transparent);
 }
 
 .section-nav {
@@ -568,6 +642,14 @@ a {
   font-weight: 500;
   line-height: 1.02;
   color: var(--ink);
+}
+
+.section-eyebrow {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--cobalt);
+  font-size: 12px;
+  font-weight: 760;
 }
 
 .hero-copy h2 {
@@ -780,13 +862,20 @@ a {
   background: color-mix(in oklch, var(--paper) 72%, transparent);
 }
 
+.pricing-list article.is-featured {
+  border-color: color-mix(in oklch, var(--cobalt) 52%, var(--line));
+  background:
+    linear-gradient(145deg, color-mix(in oklch, var(--cobalt) 12%, transparent), transparent 46%),
+    color-mix(in oklch, var(--paper) 74%, transparent);
+}
+
 .feature-list article span {
   display: block;
   width: 38px;
   height: 4px;
   margin-bottom: 24px;
   border-radius: 999px;
-  background: var(--cobalt);
+  background: var(--swatch-accent);
 }
 
 .feature-list h3,
@@ -811,6 +900,55 @@ a {
   font-size: 32px;
   font-weight: 650;
   color: var(--ink);
+}
+
+.stat-list article strong {
+  display: block;
+  margin-top: 18px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 40px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.testimonial-list article p:first-of-type {
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.demo-gallery .gallery-list article {
+  min-height: 210px;
+}
+
+.demo-gallery .swatch-image {
+  width: 100%;
+  height: 104px;
+  margin-bottom: 16px;
+  border-radius: 14px;
+}
+
+.demo-form .section-form {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  align-items: end;
+  width: 100%;
+  margin-top: 0;
+  border-radius: 20px;
+}
+
+.section-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.section-form input {
+  min-width: 0;
 }
 
 .demo-cta {
@@ -1080,6 +1218,10 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     max-height: none;
   }
+
+  .brush-log {
+    display: none;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1165,10 +1307,18 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .studio-actions {
+    grid-template-columns: 1fr;
+  }
+
   .demo-features,
   .demo-pricing,
   .demo-cta {
     padding: 24px 20px;
+  }
+
+  .demo-form .section-form {
+    grid-template-columns: 1fr;
   }
 
   .command-expanded textarea {
