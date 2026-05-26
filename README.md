@@ -1,187 +1,128 @@
 # Palette
 
-Palette is a local demo app for painting a frontend into code. You start with a blank canvas, describe what you want, steer selected sections, add notes, use voice strokes, and ask Codex to write the generated React files.
+**A canvas where Codex becomes a live paintbrush.**
 
-The project has two parts:
+---
 
-- The frontend: the app you open in the browser.
-- The backend: local API routes for AI intent, voice transcription, saving folders, and Codex repo apply.
+## The Problem
 
-## What You Need
+Every AI coding tool gives you the same experience: you write a prompt, you wait, you get back a wall of code you didn't watch happen. If the result is wrong, you start over from scratch.
 
-Install these first:
+The most powerful coding agent in the world — Codex — still feels like a black box. You can't see what it's building. You can't change direction mid-generation. You just wait and hope.
 
-- Node.js 20 or newer.
-- npm, which comes with Node.
-- Codex Desktop or Codex CLI if you want the real `Codex apply` button.
-- A Groq API key if you want voice transcription.
-- An OpenAI API key if you want the remote intent bridge. Without this, Palette still works with its local demo parser.
+We use Codex every day. That friction is real, and it keeps Codex out of reach for anyone who isn't already comfortable in a terminal.
 
-## First Setup
+---
 
-Open PowerShell in the project folder:
+## The Solution
 
-```powershell
-cd C:\Users\volko\Downloads\Palette
+Palette is a canvas-first workspace for Codex.
+
+Instead of a chat box, you get a canvas. Instead of waiting, you watch Codex paint your frontend in real time — section by section, layer by layer. And instead of restarting when something looks wrong, you interrupt, point at the section, give a new direction, and Codex steers from exactly where it stopped.
+
+When it looks right, one button hands the canvas to Codex and it writes the real React files to disk.
+
+---
+
+## How It Works
+
+```
+Paint  →  Steer  →  Interrupt  →  Set the paint
 ```
 
-Install the project packages:
+**1. Paint** — Type one sentence. Palette sends it to Codex, which begins forming a frontend on the canvas in visible strokes. Hero, features, pricing, testimonials — each section appears as it's built.
 
-```powershell
+**2. Steer** — Click any section while it's forming. Open the command capsule, type a new direction, and Codex incorporates it without restarting. Voice input is also supported.
+
+**3. Interrupt** — Press Escape at any moment to lift the brush. The canvas pauses. You can inspect, redirect, or delete any section before Codex continues.
+
+**4. Set the paint** — When the canvas looks right, hit Codex Apply. Codex writes `src/generated/PalettePage.tsx` to your repo — real, working React code, not a screenshot.
+
+---
+
+## What Makes It Different
+
+| Other tools | Palette |
+|---|---|
+| Show you the finished result | Shows Codex building in real time |
+| Chat-first interaction | Canvas-first interaction |
+| Restart to change direction | Interrupt and steer mid-stroke |
+| Output is code you have to read | Output is a visual canvas you can point at |
+| Requires terminal familiarity | No terminal, no file tree, no prompt syntax |
+
+---
+
+## Built With Codex
+
+Palette was built using OpenAI Codex throughout development. The canvas painting flow — sections forming in sequence, the steering model, the interrupt mechanism — was designed around Codex's strengths as an execution agent, not a generic LLM.
+
+The core loop:
+
+1. A structured canvas model describes the frontend as typed sections with variants
+2. The OpenAI Responses API resolves natural language into safe canvas operations
+3. Codex receives a clean, validated handoff and writes the output files
+4. The frontend reflects every change in real time as operations apply
+
+---
+
+## The Canvas
+
+The interface is designed to make Codex feel approachable to anyone — not just developers.
+
+- **Blank canvas first** — open space, one obvious way to begin
+- **Painting stage** — sections appear in visible layers with a warm light sweep as each one forms
+- **Corgi studio guide** — a small companion that narrates every phase of painting in plain language
+- **Status rail** — shows the current painting phase so you always know where Codex is
+- **Reference swatches** — drag and drop images; Palette extracts colors and mixes them into the canvas
+- **Brush toolbar** — click any section to move it, remove it, or change its style
+- **Command capsule** — fixed at the bottom, opens for text or voice steering at any moment
+
+---
+
+## Themes and Variants
+
+Every generated section supports six visual variants:
+
+- **Atelier** — warm canvas surface, editorial type, soft paper texture
+- **Premium** — deep dark surface, cobalt accents, refined spacing
+- **Playful** — rounded corners, warmer palette, more expressive
+- **Minimal** — flat white, type-only, hairline borders
+- **Glass** — frosted surface, intentional blur, cobalt-tinted edges
+- **Editorial** — dark ink panel, reversed type, high contrast
+
+---
+
+## Technical Details
+
+- **Frontend** — React 19, TypeScript, Vite, Framer Motion
+- **Backend** — Node.js HTTP server (no framework), streams Codex apply progress via NDJSON
+- **AI** — OpenAI Responses API for intent resolution, Codex CLI for repo apply, Groq Whisper for voice
+- **Canvas model** — fully typed operation model with undo/redo history, export, and Codex-readable folder save
+
+---
+
+## Running It
+
+See [SETUP.md](SETUP.md) for full setup instructions, environment variables, and the demo flow.
+
+Quick start:
+
+```bash
 npm install
+npm run api   # backend on :8787
+npm run dev   # frontend on :5173
 ```
 
-Create your local environment file:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Open `.env` and fill in the keys you have:
-
-```env
-OPENAI_API_KEY=
-CODEX_API_KEY=
-GROQ_API_KEY=
-```
-
-Keep `.env` private. It is already ignored by git.
-
-## Run The App
-
-You need two PowerShell windows.
-
-In the first window, start the backend:
-
-```powershell
-cd C:\Users\volko\Downloads\Palette
-npm run api
-```
-
-Leave that window open.
-
-In the second window, start the frontend:
-
-```powershell
-cd C:\Users\volko\Downloads\Palette
-npm run dev
-```
-
-Open the URL Vite prints. It is usually:
-
-```text
-http://127.0.0.1:5173/
-```
+---
 
 ## Demo Flow
 
-Use this path for the hackathon demo:
+1. Open `http://localhost:5173`
+2. Click **Begin with a brushstroke**
+3. Type: `Build a landing page for a robot coffee shop`
+4. Pick a style — watch the canvas paint
+5. Press **Escape** mid-paint to interrupt
+6. Click the hero section — type: `make this playful`
+7. Click **Codex apply** — watch it write real files
 
-1. Open the app.
-2. Click `Begin with a brushstroke`.
-3. Use the default prompt, or type:
-
-```text
-Build a landing page for a robot coffee shop.
-```
-
-4. Pick one of the style answers.
-5. Watch the page paint in sections.
-6. Click the hero section.
-7. Click `Start stroke`.
-8. Try:
-
-```text
-headline: A live painted coffee bar
-```
-
-9. Try:
-
-```text
-add note: Give this hero more wet paint texture
-```
-
-10. Try:
-
-```text
-make this playful
-```
-
-11. Click `Codex apply` to stream real Codex progress and write generated files.
-
-## What The Buttons Do
-
-`Start stroke` opens the command box.
-
-`Command` also opens the command box.
-
-`Voice stroke` records audio and sends it to Groq, then places the transcription in the command box.
-
-`Save folder` saves the current canvas under:
-
-```text
-.palette/projects/
-```
-
-`Codex apply` asks Codex to write:
-
-```text
-src/generated/palette-project.json
-src/generated/PalettePage.tsx
-```
-
-`Set paint` downloads a JSON export of the current canvas.
-
-## Useful Shortcuts
-
-```text
-Ctrl K        Open the command box
-Ctrl Shift K  Start voice input
-Esc           Interrupt painting or stop recording
-Delete        Remove the selected section
-Ctrl Z        Undo
-Ctrl Y        Redo
-```
-
-## Environment Flags
-
-These flags are already included in `.env.example`:
-
-```env
-VITE_PALETTE_INTENT_API=1
-VITE_PALETTE_CODEX_APPLY=1
-VITE_PALETTE_PROJECT_STORE=1
-VITE_PALETTE_VOICE_API=1
-```
-
-If a feature button says the backend is offline, make sure `npm run api` is running.
-
-If voice does not transcribe, make sure `GROQ_API_KEY` is set.
-
-If remote steering falls back to local mode, make sure `OPENAI_API_KEY` or `CODEX_API_KEY` is set.
-
-If Codex apply fails, make sure Codex Desktop or Codex CLI is installed and available on this machine.
-
-## Check The Project
-
-Run the backend syntax check:
-
-```powershell
-npm run check:server
-```
-
-Run the full build:
-
-```powershell
-npm run build
-```
-
-## Common Fixes
-
-If port `5173` is busy, Vite will print another local URL. Use the URL it gives you.
-
-If port `8787` is busy, stop the old backend process and run `npm run api` again.
-
-If the frontend loads but AI features do nothing, the backend is probably not running.
-
-If Codex apply takes a while, wait for the progress panel. A real Codex run can take more than a minute.
+The whole arc takes under two minutes.
