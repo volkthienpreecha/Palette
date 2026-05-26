@@ -138,13 +138,28 @@ export function PaletteBrushToolbar({
 }) {
   return (
     <div className="brush-toolbar" onClick={(event) => event.stopPropagation()}>
-      <button type="button" title="Move up" onClick={() => helpers.onMove?.(section.id, -1)}>
+      <button
+        type="button"
+        title="Move up"
+        aria-label={`Move ${section.kind} section up`}
+        onClick={() => helpers.onMove?.(section.id, -1)}
+      >
         <ArrowUp size={14} />
       </button>
-      <button type="button" title="Move down" onClick={() => helpers.onMove?.(section.id, 1)}>
+      <button
+        type="button"
+        title="Move down"
+        aria-label={`Move ${section.kind} section down`}
+        onClick={() => helpers.onMove?.(section.id, 1)}
+      >
         <ArrowDown size={14} />
       </button>
-      <button type="button" title="Remove" onClick={() => helpers.onRemove?.(section.id)}>
+      <button
+        type="button"
+        title="Remove"
+        aria-label={`Remove ${section.kind} section`}
+        onClick={() => helpers.onRemove?.(section.id)}
+      >
         <Trash2 size={14} />
       </button>
     </div>

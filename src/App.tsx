@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { AnimatePresence, motion } from "motion/react";
 import {
   Brush,
+  Code2,
   Download,
   ImagePlus,
   Mic,
@@ -20,7 +21,6 @@ import {
   applyOperation,
   createBlankProject,
   createProjectFromTemplate,
-  parseIntent,
   paintingStageLabels,
   redoProject,
   sectionStatus,
@@ -29,6 +29,8 @@ import {
   type PaletteProject,
   type PaletteSwatch,
 } from "./paletteModel";
+import { requestCodexApply } from "./codexApplyBridge";
+import { requestIntent } from "./intentBridge";
 
 type Phase = "idle" | "interview" | "painting" | "paused" | "done";
 type ProjectTemplate = "robot-coffee" | "portfolio" | "studio-saas";
@@ -54,8 +56,15 @@ function App() {
   const [capsuleOpen, setCapsuleOpen] = useState(false);
   const [draft, setDraft] = useState(initialStroke);
   const [listening, setListening] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [repoApplying, setRepoApplying] = useState(false);
   const [status, setStatus] = useState(phaseCopy.idle);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const projectRef = useRef<PaletteProject | null>(null);
+
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
 
   const selectedSection = project.sections.find((section) => section.id === selectedId);
 
@@ -96,7 +105,7 @@ function App() {
   }, []);
 
   const applyOperations = useCallback((operations: PaletteOperation[]) => {
-    let next = project;
+    let next = projectRef.current ?? project;
     let finalStatus = "";
     let exportText: string | undefined;
 
@@ -108,13 +117,19 @@ function App() {
     }
 
     setProject(next);
+    projectRef.current = next;
     if (finalStatus) setStatus(finalStatus);
     if (exportText) downloadExport(exportText);
   }, [project]);
 
   const applyDirection = useCallback(
-    (raw: string) => {
-      const result = parseIntent(raw, { project, selectedId });
+    async (raw: string) => {
+      if (applying) return;
+      setApplying(true);
+      setStatus("Mixing the brushstroke into safe canvas operations.");
+
+      const contextProject = projectRef.current ?? project;
+      const result = await requestIntent(raw, { project: contextProject, selectedId });
       const startProject = result.operations.find(
         (operation): operation is Extract<PaletteOperation, { type: "start_project" }> =>
           operation.type === "start_project",
@@ -125,6 +140,7 @@ function App() {
         setCapsuleOpen(false);
         setPhase("interview");
         setStatus(result.status);
+        setApplying(false);
         return;
       }
 
@@ -156,8 +172,9 @@ function App() {
         setStatus(result.status);
       }
       setCapsuleOpen(false);
+      setApplying(false);
     },
-    [applyOperations, phase, project, selectedId],
+    [applying, applyOperations, phase, project, selectedId],
   );
 
   const interruptPainting = useCallback(() => {
@@ -170,9 +187,10 @@ function App() {
 
   const removeSelected = useCallback(() => {
     if (!selectedId) return;
+    if (phase === "painting") setPhase("paused");
     applyOneOperation({ type: "remove_section", id: selectedId });
     setSelectedId(null);
-  }, [applyOneOperation, selectedId]);
+  }, [applyOneOperation, phase, selectedId]);
 
   const moveSelected = useCallback(
     (id: string, direction: -1 | 1) => {
@@ -199,11 +217,38 @@ function App() {
   }, []);
 
   const setPaint = useCallback(() => {
+    if (project.sections.length === 0) {
+      setStatus("Paint needs at least one section before it can be set.");
+      return;
+    }
+
     const result = applyOperation(project, { type: "export_project" });
     setProject(result.project);
     setStatus(result.status);
     if (result.project.exportText) downloadExport(result.project.exportText);
   }, [project]);
+
+  const applyToRepo = useCallback(async () => {
+    if (project.sections.length === 0) {
+      setStatus("Paint needs at least one section before Codex can apply it.");
+      return;
+    }
+
+    setRepoApplying(true);
+    setStatus("Handing the canvas to Codex for repo edits.");
+    const result = await requestCodexApply(project);
+    setRepoApplying(false);
+    setStatus(result.summary ? `${result.status} ${result.summary}` : result.status);
+  }, [project]);
+
+  const removeSection = useCallback(
+    (id: string) => {
+      if (phase === "painting") setPhase("paused");
+      applyOneOperation({ type: "remove_section", id });
+      setSelectedId(null);
+    },
+    [applyOneOperation, phase],
+  );
 
   const addFiles = useCallback(
     (files: FileList | File[]) => {
@@ -348,6 +393,8 @@ function App() {
           onUndo={undo}
           onRedo={redo}
           onSetPaint={setPaint}
+          onApplyToRepo={applyToRepo}
+          repoApplying={repoApplying}
         />
 
         <section className="canvas-zone" aria-label="Palette canvas">
@@ -413,10 +460,7 @@ function App() {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 onMove={moveSelected}
-                onRemove={(id) => {
-                  applyOneOperation({ type: "remove_section", id });
-                  setSelectedId(null);
-                }}
+                onRemove={removeSection}
                 onSetPaint={setPaint}
               />
             ) : null}
@@ -429,6 +473,7 @@ function App() {
         open={capsuleOpen}
         draft={draft}
         listening={listening}
+        applying={applying}
         selectedSection={selectedSection}
         onOpen={openCommandCapsule}
         onDraft={setDraft}
@@ -454,6 +499,7 @@ function App() {
         ref={fileInputRef}
         className="hidden-input"
         type="file"
+        aria-label="Reference image swatches"
         accept="image/*"
         multiple
         onChange={(event) => {
@@ -472,6 +518,8 @@ function ReferenceSwatches({
   onUndo,
   onRedo,
   onSetPaint,
+  onApplyToRepo,
+  repoApplying,
 }: {
   project: PaletteProject;
   onFiles: (files: FileList | File[]) => void;
@@ -479,6 +527,8 @@ function ReferenceSwatches({
   onUndo: () => void;
   onRedo: () => void;
   onSetPaint: () => void;
+  onApplyToRepo: () => void;
+  repoApplying: boolean;
 }) {
   return (
     <aside className="swatch-panel">
@@ -497,9 +547,13 @@ function ReferenceSwatches({
           <Redo2 size={14} />
           Redo
         </button>
-        <button type="button" onClick={onSetPaint}>
+        <button type="button" onClick={onSetPaint} disabled={project.sections.length === 0}>
           <Download size={14} />
           Set paint
+        </button>
+        <button type="button" onClick={onApplyToRepo} disabled={project.sections.length === 0 || repoApplying}>
+          <Code2 size={14} />
+          {repoApplying ? "Applying" : "Codex apply"}
         </button>
       </div>
       <div
@@ -649,6 +703,7 @@ function CommandCapsule({
   open,
   draft,
   listening,
+  applying,
   selectedSection,
   onDraft,
   onOpen,
@@ -661,6 +716,7 @@ function CommandCapsule({
   open: boolean;
   draft: string;
   listening: boolean;
+  applying: boolean;
   selectedSection?: PaletteSectionModel;
   onOpen: () => void;
   onDraft: (value: string) => void;
@@ -669,6 +725,13 @@ function CommandCapsule({
   onInterrupt: () => void;
   onListen: () => void;
 }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }, [open]);
+
   return (
     <div className={`command-dock ${open ? "is-open" : ""}`}>
       {open ? (
@@ -686,8 +749,15 @@ function CommandCapsule({
             </button>
           </div>
           <textarea
+            ref={textareaRef}
             value={draft}
             onChange={(event) => onDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !applying) {
+                event.preventDefault();
+                onSubmit();
+              }
+            }}
             aria-label="Brushstroke instruction"
             placeholder="Say what should change"
           />
@@ -702,9 +772,9 @@ function CommandCapsule({
                 Interrupt
               </button>
             ) : null}
-            <button className="send-stroke" type="button" onClick={onSubmit}>
+            <button className="send-stroke" type="button" onClick={onSubmit} disabled={applying}>
               <Send size={16} />
-              Apply stroke
+              {applying ? "Mixing" : "Apply stroke"}
             </button>
           </div>
         </motion.div>

@@ -203,7 +203,7 @@ export function parseIntent(command: string, context: CommandContext): IntentRes
     return { operations: [], status: "No brushstroke given." };
   }
 
-  if (text.includes("portfolio")) {
+  if (text.includes("portfolio") || looksLikeAtelierSite(text)) {
     return {
       operations: [{ type: "start_project", template: "portfolio" }],
       status: "Palette selected an editorial portfolio model.",
@@ -220,14 +220,23 @@ export function parseIntent(command: string, context: CommandContext): IntentRes
   }
 
   if (
-    text.includes("build") ||
-    text.includes("landing page") ||
     text.includes("robot coffee") ||
-    text.includes("coffee shop")
+    text.includes("coffee shop") ||
+    text.includes("coffee") ||
+    text.includes("cafe") ||
+    text.includes("roast")
   ) {
     return {
       operations: [{ type: "start_project", template: "robot-coffee" }],
       status: "Palette selected the robot coffee shop model.",
+      shouldPaint: true,
+    };
+  }
+
+  if (text.includes("build") || text.includes("landing page") || text.includes("website") || text.includes("site")) {
+    return {
+      operations: [{ type: "start_project", template: "studio-saas" }],
+      status: "Palette selected a calm software workspace model.",
       shouldPaint: true,
     };
   }
@@ -253,45 +262,14 @@ export function parseIntent(command: string, context: CommandContext): IntentRes
     };
   }
 
-  if (text.includes("waitlist") || text.includes("email form")) {
-    const id = selected?.kind === "hero" ? selected.id : firstSectionId(context.project, "hero");
-    return id
-      ? { operations: [{ type: "add_waitlist", id }], status: "Painted a waitlist form into the hero." }
-      : { operations: [{ type: "add_section", section: formSection() }], status: "Painted a form section." };
-  }
-
-  if (text.includes("testimonial") || text.includes("quote")) {
+  const sectionOperations = sectionOperationsFromText(text, context.project, selectedId, selected);
+  if (sectionOperations.length > 0) {
     return {
-      operations: [{ type: "add_section", section: testimonialsSection(), afterId: selectedId ?? undefined }],
-      status: "Pinned studio notes onto the canvas.",
-    };
-  }
-
-  if (text.includes("gallery") || text.includes("image strip") || text.includes("references")) {
-    return {
-      operations: [{ type: "add_section", section: gallerySection(), afterId: selectedId ?? undefined }],
-      status: "Painted a gallery strip from the reference language.",
-    };
-  }
-
-  if (text.includes("stats") || text.includes("numbers")) {
-    return {
-      operations: [{ type: "add_section", section: statsSection(), afterId: selectedId ?? undefined }],
-      status: "Added a small structure strip to the canvas.",
-    };
-  }
-
-  if (text.includes("form") || text.includes("contact")) {
-    return {
-      operations: [{ type: "add_section", section: formSection(), afterId: selectedId ?? undefined }],
-      status: "Painted a form section.",
-    };
-  }
-
-  if (text.includes("pricing")) {
-    return {
-      operations: [{ type: "add_section", section: pricingSection(), afterId: selectedId ?? undefined }],
-      status: "Framed a pricing section.",
+      operations: sectionOperations,
+      status:
+        sectionOperations.length === 1
+          ? statusForSectionOperation(sectionOperations[0])
+          : "Painted the requested canvas changes in one pass.",
     };
   }
 
@@ -371,9 +349,7 @@ export function applyOperation(project: PaletteProject, operation: PaletteOperat
     case "add_section":
       next.sections = insertSection(
         next.sections,
-        next.swatchColors?.length
-          ? applySwatchToSection(operation.section, next.swatches[0], next.swatchColors)
-          : operation.section,
+        prepareSectionForProject(operation.section, next),
         operation.afterId,
       );
       return commit(next, snapshot, "Section painted", `${operation.section.kind} joined the canvas.`);
@@ -497,6 +473,17 @@ function mixSwatchIntoProject(project: PaletteProject, swatch: PaletteSwatch): v
   project.swatchAccent = accent;
   project.swatchColors = colors;
   project.sections = project.sections.map((section) => applySwatchToSection(section, swatch, colors));
+}
+
+function prepareSectionForProject(section: PaletteSectionModel, project: PaletteProject): PaletteSectionModel {
+  const themedSection =
+    project.theme === "premium" && (!section.variant || section.variant === "atelier")
+      ? { ...section, variant: "premium" as const }
+      : section;
+
+  return project.swatchColors?.length
+    ? applySwatchToSection(themedSection, project.swatches[0], project.swatchColors)
+    : themedSection;
 }
 
 function applySwatchToSection(
@@ -865,6 +852,77 @@ function footerSection(title: string, footerText: string): PaletteSectionModel {
 
 function firstSectionId(project: PaletteProject, kind: PaletteSectionKind): string | undefined {
   return project.sections.find((section) => section.kind === kind)?.id;
+}
+
+function looksLikeAtelierSite(text: string) {
+  const siteIntent =
+    text.includes("build") ||
+    text.includes("landing page") ||
+    text.includes("website") ||
+    text.includes("site") ||
+    text.includes("page");
+  const atelierSubject =
+    text.includes("ceramic") ||
+    text.includes("pottery") ||
+    text.includes("atelier") ||
+    text.includes("artist") ||
+    text.includes("gallery") ||
+    text.includes("studio notes");
+  return siteIntent && atelierSubject;
+}
+
+function sectionOperationsFromText(
+  text: string,
+  project: PaletteProject,
+  selectedId: string | null,
+  selected?: PaletteSectionModel,
+): PaletteOperation[] {
+  const operations: PaletteOperation[] = [];
+  const afterId = selectedId ?? undefined;
+
+  if (text.includes("waitlist") || text.includes("signup") || text.includes("email form")) {
+    const id = selected?.kind === "hero" ? selected.id : firstSectionId(project, "hero");
+    operations.push(id ? { type: "add_waitlist", id } : { type: "add_section", section: formSection(), afterId });
+  }
+
+  if (
+    text.includes("testimonial") ||
+    text.includes("quote") ||
+    text.includes("studio note") ||
+    text.includes("studio notes") ||
+    text.includes("notes")
+  ) {
+    operations.push({ type: "add_section", section: testimonialsSection(), afterId });
+  }
+
+  if (text.includes("gallery") || text.includes("image strip") || text.includes("references")) {
+    operations.push({ type: "add_section", section: gallerySection(), afterId });
+  }
+
+  if (text.includes("stats") || text.includes("numbers")) {
+    operations.push({ type: "add_section", section: statsSection(), afterId });
+  }
+
+  if (text.includes("form") || text.includes("contact")) {
+    operations.push({ type: "add_section", section: formSection(), afterId });
+  }
+
+  if (text.includes("pricing")) {
+    operations.push({ type: "add_section", section: pricingSection(), afterId });
+  }
+
+  return operations;
+}
+
+function statusForSectionOperation(operation: PaletteOperation) {
+  if (operation.type === "add_waitlist") return "Painted a waitlist form into the hero.";
+  if (operation.type !== "add_section") return "Painted the selected canvas change.";
+  if (operation.section.kind === "testimonials") return "Pinned studio notes onto the canvas.";
+  if (operation.section.kind === "gallery") return "Painted a gallery strip from the reference language.";
+  if (operation.section.kind === "stats") return "Added a small structure strip to the canvas.";
+  if (operation.section.kind === "form") return "Painted a form section.";
+  if (operation.section.kind === "pricing") return "Framed a pricing section.";
+  return "Painted a new section.";
 }
 
 function insertSection(sections: PaletteSectionModel[], section: PaletteSectionModel, afterId?: string) {

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "api": "node server/index.mjs",
+    "check:server": "node --check server/index.mjs && node --check server/paletteIntent.mjs && node --check server/codexApply.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 qa/
+.palette/
 .vite-dev.*.log
 *.tsbuildinfo
 vite.config.js

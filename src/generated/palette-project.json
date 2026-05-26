@@ -1,0 +1,74 @@
+{
+  "id": "demo-robot-atelier",
+  "name": "Palette Demo Atelier",
+  "theme": "premium",
+  "swatchAccent": "#8f5f2b",
+  "swatchColors": [
+    "#f5efe4",
+    "#26302d",
+    "#8f5f2b"
+  ],
+  "sections": [
+    {
+      "id": "nav",
+      "kind": "nav",
+      "title": "Automat Atelier",
+      "links": [
+        {
+          "label": "Menu"
+        },
+        {
+          "label": "Roasts"
+        },
+        {
+          "label": "Reserve"
+        }
+      ]
+    },
+    {
+      "id": "hero",
+      "kind": "hero",
+      "title": "An atelier where brass baristas pull perfect espresso.",
+      "subtitle": "Palette turns a beginner prompt into a living interface that can be steered while it is still being made.",
+      "eyebrow": "Robot coffee, painted to order",
+      "hasWaitlist": true,
+      "actions": [
+        {
+          "label": "Join waitlist"
+        },
+        {
+          "label": "View menu"
+        }
+      ]
+    },
+    {
+      "id": "features",
+      "kind": "features",
+      "title": "What the canvas painted",
+      "features": [
+        {
+          "title": "Mid-stroke steering"
+        },
+        {
+          "title": "Visual selection"
+        },
+        {
+          "title": "Repo output"
+        }
+      ]
+    },
+    {
+      "id": "form",
+      "kind": "form",
+      "title": "Reserve a tasting",
+      "fields": [
+        {
+          "label": "Name"
+        },
+        {
+          "label": "Email"
+        }
+      ]
+    }
+  ]
+}
