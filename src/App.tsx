@@ -112,7 +112,8 @@ function App() {
   }, []);
 
   const applyOperations = useCallback((operations: PaletteOperation[]) => {
-    let next = projectRef.current ?? project;
+    // projectRef is always current — set synchronously in the useEffect above
+    let next = projectRef.current!;
     let finalStatus = "";
     let exportText: string | undefined;
 
@@ -127,7 +128,7 @@ function App() {
     projectRef.current = next;
     if (finalStatus) setStatus(finalStatus);
     if (exportText) downloadExport(exportText);
-  }, [project]);
+  }, []);
 
   const applyDirection = useCallback(
     async (raw: string) => {
@@ -135,7 +136,7 @@ function App() {
       setApplying(true);
       setStatus("Mixing the brushstroke into safe canvas operations.");
 
-      const contextProject = projectRef.current ?? project;
+      const contextProject = projectRef.current!;
       const result = await requestIntent(raw, { project: contextProject, selectedId });
       const startProject = result.operations.find(
         (operation): operation is Extract<PaletteOperation, { type: "start_project" }> =>
@@ -181,7 +182,7 @@ function App() {
       setCapsuleOpen(false);
       setApplying(false);
     },
-    [applying, applyOperations, phase, project, selectedId],
+    [applying, applyOperations, phase, selectedId],
   );
 
   const interruptPainting = useCallback(() => {
@@ -566,9 +567,10 @@ function App() {
                 <motion.div
                   className="interview-card"
                   key="interview"
-                  initial={{ opacity: 0, scale: 0.96 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
+                  initial={{ clipPath: "circle(0% at 50% 50%)", opacity: 0 }}
+                  animate={{ clipPath: "circle(80% at 50% 50%)", opacity: 1 }}
+                  exit={{ clipPath: "circle(0% at 50% 50%)", opacity: 0 }}
+                  transition={{ duration: 0.46, ease: [0.16, 1, 0.3, 1] }}
                 >
                   <span>Prime the canvas</span>
                   <h2>Should this first wash feel premium or editorial?</h2>
@@ -765,7 +767,17 @@ function CorgiGuide({ phase, status }: { phase: Phase; status: string }) {
       <div className="corgi-sprite" aria-hidden="true" />
       <div>
         <span>Studio guide</span>
-        <p>{status}</p>
+        <AnimatePresence mode="popLayout">
+          <motion.p
+            key={status}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {status}
+          </motion.p>
+        </AnimatePresence>
       </div>
     </aside>
   );
@@ -790,10 +802,16 @@ function StatusRail({
       {visibleLabels.map((label, index) => {
         const state = phase === "done" || index < activeStep ? "done" : index === activeStep ? "active" : "";
         return (
-          <li className={state} key={label}>
+          <motion.li
+            className={state}
+            key={label}
+            layout
+            animate={state === "active" ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+            transition={state === "active" ? { duration: 0.28, ease: [0.16, 1, 0.3, 1] } : {}}
+          >
             <span />
             {label}
-          </li>
+          </motion.li>
         );
       })}
     </ol>
@@ -830,10 +848,10 @@ function GeneratedPage({
             className="section-motion-shell"
             key={section.id}
             layout
-            initial={{ opacity: 0, filter: "blur(12px)", y: 22 }}
-            animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-            exit={{ opacity: 0, filter: "blur(10px)", y: -16 }}
-            transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -14 }}
+            transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
           >
             <PaletteSectionView
               section={section}
@@ -890,12 +908,15 @@ function CommandCapsule({
 
   return (
     <div className={`command-dock ${open ? "is-open" : ""}`}>
+      <AnimatePresence mode="wait">
       {open ? (
         <motion.div
+          key="expanded"
           className="command-expanded"
           initial={{ opacity: 0, y: 20, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 18, scale: 0.98 }}
+          transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
         >
           <div className="command-topline">
             <span>{selectedSection ? `Steering ${selectedSection.kind}` : "Steer the canvas"}</span>
@@ -946,12 +967,22 @@ function CommandCapsule({
           </div>
         </motion.div>
       ) : (
-        <button className="command-compact" type="button" onClick={onOpen}>
+        <motion.button
+          key="compact"
+          className="command-compact"
+          type="button"
+          onClick={onOpen}
+          initial={{ opacity: 0, y: 10, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.97 }}
+          transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+        >
           <Mic size={18} />
           <span>Ctrl K steer</span>
           <Brush size={16} />
-        </button>
+        </motion.button>
       )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -981,7 +1012,13 @@ function extractColors(url: string): Promise<string[]> {
         return;
       }
       context.drawImage(image, 0, 0, size, size);
-      const data = context.getImageData(0, 0, size, size).data;
+      let data: Uint8ClampedArray;
+      try {
+        data = context.getImageData(0, 0, size, size).data;
+      } catch {
+        resolve([]);
+        return;
+      }
       let r = 0;
       let g = 0;
       let b = 0;

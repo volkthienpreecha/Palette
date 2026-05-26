@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
 
 export type PaletteSectionKind =
@@ -401,6 +401,37 @@ export function PaletteTestimonialsSection({ section }: { section: PaletteSectio
   );
 }
 
+function CountUp({ value }: { value: string }) {
+  const match = value.match(/(\d+)/);
+  const num = match ? parseInt(match[1], 10) : NaN;
+  const prefix = match ? value.slice(0, match.index) : "";
+  const suffix = match ? value.slice((match.index ?? 0) + match[1].length) : "";
+  const [displayed, setDisplayed] = useState(0);
+
+  useEffect(() => {
+    if (isNaN(num) || num === 0) return;
+    const duration = Math.min(1100, 380 + num * 72);
+    let rafId: number;
+    const delayId = window.setTimeout(() => {
+      const startTime = performance.now();
+      const step = (now: number) => {
+        const progress = Math.min((now - startTime) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        setDisplayed(Math.round(eased * num));
+        if (progress < 1) rafId = requestAnimationFrame(step);
+      };
+      rafId = requestAnimationFrame(step);
+    }, 300);
+    return () => {
+      window.clearTimeout(delayId);
+      cancelAnimationFrame(rafId);
+    };
+  }, [num]);
+
+  if (isNaN(num)) return <>{value}</>;
+  return <>{prefix}{displayed}{suffix}</>;
+}
+
 export function PaletteStatsSection({ section }: { section: PaletteSectionModel }) {
   const stats = section.stats ?? [
     { value: "1", label: "canvas model" },
@@ -415,7 +446,7 @@ export function PaletteStatsSection({ section }: { section: PaletteSectionModel 
         {stats.map((item) => (
           <article key={`${item.value}-${item.label}`}>
             <span />
-            <strong>{item.value}</strong>
+            <strong><CountUp value={item.value} /></strong>
             <p>{item.label}</p>
           </article>
         ))}
