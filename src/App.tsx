@@ -4,6 +4,7 @@ import {
   Brush,
   Code2,
   Download,
+  FolderDown,
   ImagePlus,
   Mic,
   Pause,
@@ -29,8 +30,10 @@ import {
   type PaletteProject,
   type PaletteSwatch,
 } from "./paletteModel";
-import { requestCodexApply } from "./codexApplyBridge";
+import { requestCodexApply, type CodexApplyEvent } from "./codexApplyBridge";
 import { requestIntent } from "./intentBridge";
+import { requestProjectSave } from "./projectStoreBridge";
+import { requestVoiceTranscription } from "./voiceBridge";
 
 type Phase = "idle" | "interview" | "painting" | "paused" | "done";
 type ProjectTemplate = "robot-coffee" | "portfolio" | "studio-saas";
@@ -58,9 +61,13 @@ function App() {
   const [listening, setListening] = useState(false);
   const [applying, setApplying] = useState(false);
   const [repoApplying, setRepoApplying] = useState(false);
+  const [savingProject, setSavingProject] = useState(false);
+  const [codexEvents, setCodexEvents] = useState<CodexApplyEvent[]>([]);
   const [status, setStatus] = useState(phaseCopy.idle);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectRef = useRef<PaletteProject | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
     projectRef.current = project;
@@ -235,11 +242,104 @@ function App() {
     }
 
     setRepoApplying(true);
+    setCodexEvents([{ type: "phase", label: "Preparing Codex handoff", detail: "The canvas is being packed." }]);
     setStatus("Handing the canvas to Codex for repo edits.");
-    const result = await requestCodexApply(project);
+    const result = await requestCodexApply(project, (event) => {
+      setCodexEvents((current) => (event.type === "output" ? current : [...current, event].slice(-10)));
+      if (event.label) {
+        setStatus(event.type === "output" ? event.label : event.detail ? `${event.label}. ${event.detail}` : event.label);
+      }
+    });
     setRepoApplying(false);
-    setStatus(result.summary ? `${result.status} ${result.summary}` : result.status);
+    setStatus(result.status);
   }, [project]);
+
+  const saveToFolder = useCallback(async () => {
+    if (project.sections.length === 0) {
+      setStatus("Paint needs at least one section before it can be saved.");
+      return;
+    }
+
+    setSavingProject(true);
+    setStatus("Saving the canvas as a Codex-readable folder.");
+    const result = await requestProjectSave(project);
+    setSavingProject(false);
+    setStatus(result.folder ? `${result.status} ${result.folder}` : result.status);
+  }, [project]);
+
+  const fallbackVoiceStroke = useCallback(
+    (fallbackStatus?: string) => {
+      const next =
+        phase === "paused"
+          ? "Make it darker and more premium."
+          : selectedId
+            ? "Add a waitlist form here."
+            : initialStroke;
+      setDraft(next);
+      setListening(false);
+      setStatus(fallbackStatus || "Voice bridge unavailable. Filled a demo brushstroke.");
+    },
+    [phase, selectedId],
+  );
+
+  const finishVoiceRecording = useCallback(
+    async (audio: Blob) => {
+      setListening(false);
+      setStatus("Transcribing the spoken brushstroke.");
+      const result = await requestVoiceTranscription(audio);
+
+      if (result.text) {
+        setDraft(result.text);
+        setStatus(result.status);
+        return;
+      }
+
+      fallbackVoiceStroke(result.status);
+    },
+    [fallbackVoiceStroke],
+  );
+
+  const toggleVoiceInput = useCallback(async () => {
+    const currentRecorder = mediaRecorderRef.current;
+    if (currentRecorder && currentRecorder.state !== "inactive") {
+      currentRecorder.stop();
+      return;
+    }
+
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
+      fallbackVoiceStroke("This browser cannot record voice. Filled a demo brushstroke.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const audio = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        void finishVoiceRecording(audio);
+      };
+
+      recorder.start();
+      setCapsuleOpen(true);
+      setListening(true);
+      setStatus("Listening for a spoken brushstroke.");
+    } catch {
+      fallbackVoiceStroke("Microphone access was not available. Filled a demo brushstroke.");
+    }
+  }, [fallbackVoiceStroke, finishVoiceRecording]);
 
   const removeSection = useCallback(
     (id: string) => {
@@ -305,6 +405,13 @@ function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === "k") {
+        event.preventDefault();
+        openCommandCapsule();
+        void toggleVoiceInput();
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && key === "k") {
         event.preventDefault();
         openCommandCapsule();
@@ -324,7 +431,11 @@ function App() {
       }
 
       if (event.key === "Escape") {
-        if (phase === "painting") {
+        const currentRecorder = mediaRecorderRef.current;
+        if (currentRecorder && currentRecorder.state !== "inactive") {
+          event.preventDefault();
+          currentRecorder.stop();
+        } else if (phase === "painting") {
           event.preventDefault();
           interruptPainting();
         } else if (capsuleOpen) {
@@ -349,7 +460,24 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [capsuleOpen, interruptPainting, openCommandCapsule, phase, redo, removeSelected, selectedId, undo]);
+  }, [
+    capsuleOpen,
+    interruptPainting,
+    openCommandCapsule,
+    phase,
+    redo,
+    removeSelected,
+    selectedId,
+    toggleVoiceInput,
+    undo,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      const currentRecorder = mediaRecorderRef.current;
+      if (currentRecorder && currentRecorder.state !== "inactive") currentRecorder.stop();
+    };
+  }, []);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -376,7 +504,7 @@ function App() {
         <div className="header-actions">
           <button className="glass-button muted" type="button" onClick={openCommandCapsule}>
             <Mic size={16} />
-            <span>Steer</span>
+            <span>Command</span>
           </button>
           <button className="glass-button" type="button" onClick={openCommandCapsule}>
             <Play size={16} />
@@ -393,8 +521,11 @@ function App() {
           onUndo={undo}
           onRedo={redo}
           onSetPaint={setPaint}
+          onSaveFolder={saveToFolder}
           onApplyToRepo={applyToRepo}
+          savingProject={savingProject}
           repoApplying={repoApplying}
+          codexEvents={codexEvents}
         />
 
         <section className="canvas-zone" aria-label="Palette canvas">
@@ -440,7 +571,7 @@ function App() {
                   exit={{ opacity: 0, scale: 0.96 }}
                 >
                   <span>Prime the canvas</span>
-                  <h2>Should this feel playful, premium, or cozy?</h2>
+                  <h2>Should this first wash feel premium or editorial?</h2>
                   <div className="interview-options">
                     <button type="button" onClick={() => replaceProjectForPainting(pendingTemplate, "premium")}>
                       Premium, but still charming
@@ -478,21 +609,9 @@ function App() {
         onOpen={openCommandCapsule}
         onDraft={setDraft}
         onClose={() => setCapsuleOpen(false)}
-        onSubmit={() => applyDirection(draft)}
+        onSubmit={(value) => applyDirection(value ?? draft)}
         onInterrupt={interruptPainting}
-        onListen={() => {
-          setListening(true);
-          const next =
-            phase === "paused"
-              ? "Make it darker and more premium."
-              : selectedId
-                ? "Add a waitlist form here."
-                : initialStroke;
-          window.setTimeout(() => {
-            setDraft(next);
-            setListening(false);
-          }, 720);
-        }}
+        onListen={toggleVoiceInput}
       />
 
       <input
@@ -518,8 +637,11 @@ function ReferenceSwatches({
   onUndo,
   onRedo,
   onSetPaint,
+  onSaveFolder,
   onApplyToRepo,
+  savingProject,
   repoApplying,
+  codexEvents,
 }: {
   project: PaletteProject;
   onFiles: (files: FileList | File[]) => void;
@@ -527,8 +649,11 @@ function ReferenceSwatches({
   onUndo: () => void;
   onRedo: () => void;
   onSetPaint: () => void;
+  onSaveFolder: () => void;
   onApplyToRepo: () => void;
+  savingProject: boolean;
   repoApplying: boolean;
+  codexEvents: CodexApplyEvent[];
 }) {
   return (
     <aside className="swatch-panel">
@@ -551,11 +676,26 @@ function ReferenceSwatches({
           <Download size={14} />
           Set paint
         </button>
-        <button type="button" onClick={onApplyToRepo} disabled={project.sections.length === 0 || repoApplying}>
+        <button
+          className="folder-action"
+          type="button"
+          onClick={onSaveFolder}
+          disabled={project.sections.length === 0 || savingProject}
+        >
+          <FolderDown size={14} />
+          {savingProject ? "Saving" : "Save folder"}
+        </button>
+        <button
+          className="codex-action"
+          type="button"
+          onClick={onApplyToRepo}
+          disabled={project.sections.length === 0 || repoApplying}
+        >
           <Code2 size={14} />
           {repoApplying ? "Applying" : "Codex apply"}
         </button>
       </div>
+      <CodexProgress events={codexEvents} active={repoApplying} />
       <div
         className="drop-target"
         onDragOver={(event) => event.preventDefault()}
@@ -586,6 +726,22 @@ function ReferenceSwatches({
       </div>
       <BrushLog project={project} />
     </aside>
+  );
+}
+
+function CodexProgress({ events, active }: { events: CodexApplyEvent[]; active: boolean }) {
+  if (events.length === 0) return null;
+
+  return (
+    <section className={`codex-progress ${active ? "is-active" : ""}`} aria-label="Codex progress">
+      <h2>Codex progress</h2>
+      {events.slice(-7).map((event, index) => (
+        <article key={`${event.at ?? index}-${event.label}`}>
+          <strong>{event.label}</strong>
+          {event.detail ? <p>{event.detail}</p> : null}
+        </article>
+      ))}
+    </section>
   );
 }
 
@@ -721,9 +877,9 @@ function CommandCapsule({
   onOpen: () => void;
   onDraft: (value: string) => void;
   onClose: () => void;
-  onSubmit: () => void;
+  onSubmit: (value?: string) => void;
   onInterrupt: () => void;
-  onListen: () => void;
+  onListen: () => void | Promise<void>;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -750,21 +906,27 @@ function CommandCapsule({
           </div>
           <textarea
             ref={textareaRef}
+            autoFocus
             value={draft}
             onChange={(event) => onDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey && !applying) {
                 event.preventDefault();
-                onSubmit();
+                onSubmit(textareaRef.current?.value ?? draft);
               }
             }}
             aria-label="Brushstroke instruction"
             placeholder="Say what should change"
           />
           <div className="command-actions">
-            <button className={listening ? "is-listening" : ""} type="button" onClick={onListen}>
+            <button
+              className={listening ? "is-listening" : ""}
+              type="button"
+              aria-pressed={listening}
+              onClick={onListen}
+            >
               <Mic size={16} />
-              {listening ? "Filling" : "Demo stroke"}
+              {listening ? "Set voice" : "Voice stroke"}
             </button>
             {phase === "painting" ? (
               <button type="button" onClick={onInterrupt}>
@@ -772,7 +934,12 @@ function CommandCapsule({
                 Interrupt
               </button>
             ) : null}
-            <button className="send-stroke" type="button" onClick={onSubmit} disabled={applying}>
+            <button
+              className="send-stroke"
+              type="button"
+              onClick={() => onSubmit(textareaRef.current?.value ?? draft)}
+              disabled={applying}
+            >
               <Send size={16} />
               {applying ? "Mixing" : "Apply stroke"}
             </button>
@@ -781,7 +948,7 @@ function CommandCapsule({
       ) : (
         <button className="command-compact" type="button" onClick={onOpen}>
           <Mic size={18} />
-          <span>Ctrl K to steer</span>
+          <span>Ctrl K steer</span>
           <Brush size={16} />
         </button>
       )}

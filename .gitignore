@@ -2,6 +2,9 @@ node_modules/
 dist/
 qa/
 .palette/
+.env
+.env.local
+.env.*.local
 .vite-dev.*.log
 *.tsbuildinfo
 vite.config.js

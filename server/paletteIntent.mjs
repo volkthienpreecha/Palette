@@ -9,6 +9,7 @@ const sectionKinds = new Set([
   "stats",
   "form",
   "gallery",
+  "note",
 ]);
 
 const sectionVariants = new Set(["atelier", "premium", "playful", "minimal", "glass", "editorial"]);
@@ -36,10 +37,26 @@ export async function resolveIntent(payload, env = process.env) {
   const request = normalizeRequest(payload);
   const local = parseLocalIntent(request);
 
-  if (!env.OPENAI_API_KEY) {
+  if (local.operations.some((operation) => operation.type === "start_project")) {
     return {
       operations: local.operations,
-      status: `No OPENAI_API_KEY set. ${local.status}`,
+      status: local.status,
+      source: "local",
+    };
+  }
+
+  if (local.operations.length > 0 && shouldPreferLocal(request)) {
+    return {
+      operations: local.operations,
+      status: local.status,
+      source: "local",
+    };
+  }
+
+  if (!openAiKey(env)) {
+    return {
+      operations: local.operations,
+      status: `No OPENAI_API_KEY or CODEX_API_KEY set. ${local.status}`,
       source: "local",
     };
   }
@@ -90,6 +107,14 @@ function parseLocalIntent({ command, selectedId, project }) {
 
   if (!text) {
     return { operations: [], status: "No brushstroke given." };
+  }
+
+  const preciseOperations = preciseSectionOperationsFromText(command, text, project, selectedId, selected);
+  if (preciseOperations.length > 0) {
+    return {
+      operations: preciseOperations,
+      status: statusForPreciseOperations(preciseOperations),
+    };
   }
 
   if (text.includes("portfolio") || looksLikeAtelierSite(text)) {
@@ -202,6 +227,109 @@ function parseLocalIntent({ command, selectedId, project }) {
   return { operations: [], status: "Local parser saved the note. Select a section for a precise stroke." };
 }
 
+function shouldPreferLocal({ command, selectedId }) {
+  const text = command.toLowerCase();
+  if (selectedId) return true;
+  return (
+    text.includes("note:") ||
+    text.includes("add note") ||
+    text.includes("pin note") ||
+    text.includes("headline") ||
+    text.includes("title:") ||
+    text.includes("subtitle") ||
+    text.includes("copy:") ||
+    text.includes("delete") ||
+    text.includes("remove") ||
+    text.includes("move up") ||
+    text.includes("move down")
+  );
+}
+
+function preciseSectionOperationsFromText(command, text, project, selectedId, selected) {
+  const operations = [];
+  const targetId = selectedId ?? firstSectionId(project, "hero");
+  const noteText = extractNoteText(command);
+
+  if (noteText) {
+    operations.push({
+      type: "add_section",
+      section: noteSection(noteText, selected),
+      afterId: selectedId ?? undefined,
+    });
+  }
+
+  const title = extractRewriteText(command, [
+    /\b(?:change|set|make|rewrite)\s+(?:the\s+)?(?:headline|title|heading)\s+(?:to|as)\s+(.+)$/i,
+    /\b(?:headline|title|heading)\s*:\s*(.+)$/i,
+    /\bmake\s+(?:this|it|section)\s+say\s+(.+)$/i,
+  ]);
+  if (targetId && title) {
+    operations.push({ type: "update_section", id: targetId, patch: { title } });
+  }
+
+  const subtitle = extractRewriteText(command, [
+    /\b(?:change|set|make|rewrite)\s+(?:the\s+)?(?:subtitle|subhead|copy|body|description)\s+(?:to|as)\s+(.+)$/i,
+    /\b(?:subtitle|subhead|copy|body|description)\s*:\s*(.+)$/i,
+  ]);
+  if (targetId && subtitle) {
+    operations.push({ type: "update_section", id: targetId, patch: { subtitle } });
+  }
+
+  const variant = selectedId ? variantFromText(text) : undefined;
+  if (selectedId && variant) {
+    operations.push({ type: "set_variant", id: selectedId, variant });
+  }
+
+  return operations;
+}
+
+function extractNoteText(command) {
+  return extractRewriteText(command, [
+    /\b(?:add|pin|write|leave)\s+(?:a\s+)?note(?:\s+(?:that|says|about))?\s*:?\s*(.+)$/i,
+    /^note\s*:?\s*(.+)$/i,
+  ]);
+}
+
+function extractRewriteText(command, patterns) {
+  for (const pattern of patterns) {
+    const match = command.match(pattern);
+    if (match?.[1]) return cleanFreeform(match[1]);
+  }
+  return "";
+}
+
+function cleanFreeform(value) {
+  return value
+    .replace(/^[\s"']+|[\s"']+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
+function variantFromText(text) {
+  if (text.includes("playful") || text.includes("fun")) return "playful";
+  if (text.includes("minimal") || text.includes("quieter") || text.includes("simple")) return "minimal";
+  if (text.includes("glass") || text.includes("glassy") || text.includes("liquid")) return "glass";
+  if (text.includes("editorial") || text.includes("atelier") || text.includes("classic")) return "editorial";
+  if (text.includes("darker") || text.includes("premium") || text.includes("apple") || text.includes("luxury")) {
+    return "premium";
+  }
+  return undefined;
+}
+
+function statusForPreciseOperations(operations) {
+  if (operations.some((operation) => operation.type === "add_section" && operation.section.kind === "note")) {
+    return "Local parser pinned a note beside the selected section.";
+  }
+  if (operations.some((operation) => operation.type === "update_section")) {
+    return "Local parser repainted the selected wording.";
+  }
+  if (operations.some((operation) => operation.type === "set_variant")) {
+    return "Local parser changed only the selected section.";
+  }
+  return "Local parser painted the selected canvas change.";
+}
+
 async function callOpenAI(request, env) {
   const model = env.OPENAI_MODEL || "gpt-4.1-mini";
   const body = {
@@ -214,7 +342,17 @@ async function callOpenAI(request, env) {
             type: "input_text",
             text:
               "You translate Palette canvas steering commands into PaletteOperation JSON only. " +
-              "Return safe operations from the allowlist. Do not return code, prose outside JSON, CSS, scripts, or arbitrary state.",
+              "Return safe operations from the allowlist. Do not return code, prose outside JSON, CSS, scripts, or arbitrary state. " +
+              "Never return an empty operations array when the command clearly maps to an allowed operation. " +
+              "Rules: darker, premium, black, luxury -> set_theme premium and set_variant premium for existing sections. " +
+              "lighter, editorial, quiet, atelier -> set_theme atelier. " +
+              "waitlist, form, email, signup -> add_waitlist for the selected section, or add a form section if nothing is selected. " +
+              "headline/title edits -> update_section title for selectedId when present. copy/subtitle edits -> update_section subtitle for selectedId when present. " +
+              "add note or note: text -> add_section with kind note after selectedId, using the note text as subtitle. " +
+              "gallery, portfolio, images -> add a gallery section. " +
+              "contact -> add a form section titled Contact the studio. " +
+              "remove, delete -> remove_section only when selectedId is present. " +
+              "Example response: {\"status\":\"Applied a darker glaze.\",\"operations\":[{\"type\":\"set_theme\",\"theme\":\"premium\"},{\"type\":\"set_variant\",\"id\":\"hero\",\"variant\":\"premium\"}]}",
           },
         ],
       },
@@ -270,7 +408,7 @@ async function callOpenAI(request, env) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      Authorization: `Bearer ${openAiKey(env)}`,
     },
     body: JSON.stringify(body),
   });
@@ -283,6 +421,10 @@ async function callOpenAI(request, env) {
   const text = extractOutputText(json);
   if (!text) throw new Error("OpenAI response had no output text.");
   return JSON.parse(text);
+}
+
+function openAiKey(env) {
+  return env.OPENAI_API_KEY || env.CODEX_API_KEY || "";
 }
 
 function validateIntentResult(result, request) {
@@ -531,7 +673,9 @@ function sectionOperationsFromText(text, project, selectedId, selected) {
     operations.push({ type: "add_section", section: statsSection(), afterId });
   }
 
-  if (text.includes("form") || text.includes("contact")) {
+  if (text.includes("contact")) {
+    operations.push({ type: "add_section", section: contactSection(), afterId });
+  } else if (text.includes("form")) {
     operations.push({ type: "add_section", section: formSection(), afterId });
   }
 
@@ -548,6 +692,10 @@ function statusForSectionOperation(operation) {
   if (operation.section.kind === "testimonials") return "Local parser pinned studio notes.";
   if (operation.section.kind === "gallery") return "Local parser painted a gallery strip.";
   if (operation.section.kind === "stats") return "Local parser added a structure strip.";
+  if (operation.section.kind === "note") return "Local parser pinned a note beside the selected section.";
+  if (operation.section.kind === "form" && operation.section.title?.toLowerCase().includes("contact")) {
+    return "Local parser painted a contact section.";
+  }
   if (operation.section.kind === "form") return "Local parser painted a form section.";
   if (operation.section.kind === "pricing") return "Local parser framed pricing.";
   return "Local parser painted a new section.";
@@ -591,12 +739,32 @@ function formSection() {
   };
 }
 
+function contactSection() {
+  return {
+    ...formSection(),
+    title: "Contact the studio",
+    subtitle: "Send a note, collaboration idea, or request for the next study.",
+  };
+}
+
 function testimonialsSection() {
   return {
     id: uniqueId("testimonials"),
     kind: "testimonials",
     title: "Studio notes",
     subtitle: "Generated notes that show how the canvas responds to steering.",
+    variant: "atelier",
+  };
+}
+
+function noteSection(note, target) {
+  const targetLabel = target ? `${target.kind} section` : "canvas";
+  return {
+    id: uniqueId("note"),
+    kind: "note",
+    title: "Studio note",
+    subtitle: note || "Keep this direction visible while Palette keeps painting.",
+    eyebrow: `Pinned to ${targetLabel}`,
     variant: "atelier",
   };
 }

@@ -1,25 +1,25 @@
 {
-  "id": "demo-robot-atelier",
-  "name": "Palette Demo Atelier",
-  "theme": "premium",
-  "swatchAccent": "#8f5f2b",
-  "swatchColors": [
-    "#f5efe4",
-    "#26302d",
-    "#8f5f2b"
-  ],
+  "id": "palette-project",
+  "name": "Rivet and Roast",
+  "theme": "atelier",
   "sections": [
     {
-      "id": "nav",
+      "id": "nav-a383ac",
       "kind": "nav",
-      "title": "Automat Atelier",
+      "title": "Rivet & Roast",
+      "variant": "atelier",
       "links": [
         {
           "label": "Menu"
         },
         {
-          "label": "Roasts"
+          "label": "Robots"
         },
+        {
+          "label": "Visit"
+        }
+      ],
+      "actions": [
         {
           "label": "Reserve"
         }
@@ -28,47 +28,58 @@
     {
       "id": "hero",
       "kind": "hero",
-      "title": "An atelier where brass baristas pull perfect espresso.",
-      "subtitle": "Palette turns a beginner prompt into a living interface that can be steered while it is still being made.",
-      "eyebrow": "Robot coffee, painted to order",
-      "hasWaitlist": true,
+      "title": "A live painted coffee bar",
+      "subtitle": "A small autonomous cafe where every pour is measured, warm, and ready before the morning rush reaches the door.",
+      "variant": "playful",
       "actions": [
         {
           "label": "Join waitlist"
         },
         {
-          "label": "View menu"
+          "label": "First tasting opens at 7:30 AM"
         }
       ]
     },
     {
-      "id": "features",
+      "id": "note-56495e",
+      "kind": "note",
+      "title": "Studio note",
+      "subtitle": "Give this hero more wet paint texture",
+      "eyebrow": "Pinned to hero section",
+      "variant": "atelier"
+    },
+    {
+      "id": "features-1dd91d",
       "kind": "features",
-      "title": "What the canvas painted",
-      "features": [
+      "title": "Three strokes of service",
+      "subtitle": "Fast enough for commuters, quiet enough for regulars.",
+      "variant": "atelier"
+    },
+    {
+      "id": "pricing-0eea21",
+      "kind": "pricing",
+      "title": "Simple cups, clear plans",
+      "subtitle": "No app maze. Walk in, tap once, leave with a perfect cup.",
+      "variant": "atelier"
+    },
+    {
+      "id": "cta-59d090",
+      "kind": "cta",
+      "title": "Join the first morning tasting.",
+      "subtitle": "Palette can still steer this surface while the canvas stays editable.",
+      "variant": "atelier",
+      "actions": [
         {
-          "title": "Mid-stroke steering"
-        },
-        {
-          "title": "Visual selection"
-        },
-        {
-          "title": "Repo output"
+          "label": "Set the paint"
         }
       ]
     },
     {
-      "id": "form",
-      "kind": "form",
-      "title": "Reserve a tasting",
-      "fields": [
-        {
-          "label": "Name"
-        },
-        {
-          "label": "Email"
-        }
-      ]
+      "id": "footer-bdc2c5",
+      "kind": "footer",
+      "title": "Rivet & Roast",
+      "variant": "atelier",
+      "footerText": "Painted live with Palette."
     }
   ]
 }

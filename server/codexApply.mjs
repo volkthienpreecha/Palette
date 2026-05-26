@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const allowedKinds = new Set([
@@ -14,19 +15,30 @@ const allowedKinds = new Set([
   "stats",
   "form",
   "gallery",
+  "note",
 ]);
 
 export async function applyProjectWithCodex(payload, env = process.env) {
+  return applyProjectInternal(payload, env, null);
+}
+
+export async function applyProjectWithCodexStream(payload, emit = () => {}, env = process.env) {
+  return applyProjectInternal(payload, env, emit);
+}
+
+async function applyProjectInternal(payload, env, emit) {
   const project = normalizeProject(payload?.project);
   if (project.sections.length === 0) {
     throw httpError(400, "Codex apply needs at least one painted section.");
   }
 
+  emitProgress(emit, "phase", "Codex received the Palette canvas", `${project.sections.length} sections queued.`);
   const workspace = path.resolve(env.PALETTE_WORKSPACE || process.cwd());
   const paletteDir = inside(workspace, ".palette");
   const generatedDir = inside(workspace, "src/generated");
   await mkdir(paletteDir, { recursive: true });
   await mkdir(generatedDir, { recursive: true });
+  emitProgress(emit, "phase", "Codex checked the output boundary", "Only src/generated is allowed.");
 
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const handoffRel = `.palette/codex-handoff-${runId}.json`;
@@ -40,8 +52,10 @@ export async function applyProjectWithCodex(payload, env = process.env) {
   };
 
   await writeFile(handoffPath, JSON.stringify(handoff, null, 2), "utf8");
+  emitProgress(emit, "phase", "Codex read project.json", handoffRel);
 
   if (env.PALETTE_CODEX_DRY_RUN === "1") {
+    emitProgress(emit, "result", "Codex dry run prepared the handoff", "Repo edits were skipped by configuration.");
     return {
       applied: false,
       source: "dry-run",
@@ -51,6 +65,9 @@ export async function applyProjectWithCodex(payload, env = process.env) {
     };
   }
 
+  const statusBefore = await gitStatus(workspace);
+  const boundaryBefore = await boundarySnapshot(workspace, handoff.allowedFiles);
+  emitProgress(emit, "phase", "Codex started the repo edit", "Running Codex CLI in workspace-write mode.");
   const result = await runCodex({
     workspace,
     handoffRel,
@@ -58,8 +75,14 @@ export async function applyProjectWithCodex(payload, env = process.env) {
     model: cleanText(env.CODEX_MODEL, 80),
     timeoutMs: Number(env.PALETTE_CODEX_TIMEOUT_MS || 180000),
     env,
+    emit,
   });
+  emitProgress(emit, "phase", "Codex wrote PalettePage.tsx", "Generated React output is ready.");
+  emitProgress(emit, "phase", "Codex wrote palette-project.json", "Structured canvas state is ready.");
   await verifyGeneratedFiles(workspace, handoff.allowedFiles);
+  await verifyNoUnexpectedEdits(workspace, handoff.allowedFiles, statusBefore);
+  await verifyBoundarySnapshot(workspace, handoff.allowedFiles, boundaryBefore);
+  emitProgress(emit, "result", "Codex verified the generated files", "No edits escaped the Palette boundary.");
 
   return {
     applied: true,
@@ -68,12 +91,10 @@ export async function applyProjectWithCodex(payload, env = process.env) {
     handoff: handoffRel,
     files: handoff.allowedFiles,
     summary: result.summary,
-    stdout: result.stdout,
-    stderr: result.stderr,
   };
 }
 
-function normalizeProject(project) {
+export function normalizeProject(project) {
   if (!project || typeof project !== "object") {
     throw httpError(400, "Expected a Palette project.");
   }
@@ -137,7 +158,7 @@ function sanitizeRecord(value) {
   return Object.keys(cleaned).length > 0 ? cleaned : null;
 }
 
-function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, env }) {
+function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, env, emit }) {
   const prompt = [
     "You are Codex applying a Palette canvas to this repository.",
     `Read ${handoffRel}.`,
@@ -171,9 +192,11 @@ function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, en
     : codexArgs;
 
   return new Promise((resolve, reject) => {
+    const stdoutProgress = throttledCodexProgress(emit, "Codex is reading the repo");
+    const stderrProgress = throttledCodexProgress(emit, "Codex is applying the canvas");
     const child = spawn(command, args, {
       cwd: workspace,
-      env,
+      env: codexEnv(env),
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -190,9 +213,11 @@ function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, en
 
     child.stdout.on("data", (chunk) => {
       stdout = tail(stdout + chunk.toString(), 8000);
+      stdoutProgress(chunk);
     });
     child.stderr.on("data", (chunk) => {
       stderr = tail(stderr + chunk.toString(), 8000);
+      stderrProgress(chunk);
     });
     child.on("error", (error) => {
       if (settled) return;
@@ -207,17 +232,62 @@ function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, en
 
       const summary = await readFile(lastMessagePath, "utf8").catch(() => "");
       if (code !== 0) {
-        reject(httpError(500, `Codex apply failed with exit code ${code}. ${tail(stderr || stdout, 1000)}`));
+        reject(httpError(500, `Codex apply failed with exit code ${code}.`));
         return;
       }
 
       resolve({
-        stdout: tail(stdout, 3000),
-        stderr: tail(stderr, 3000),
         summary: cleanText(summary, 2000),
       });
     });
   });
+}
+
+function codexEnv(env) {
+  const next = { ...env };
+  if (next.CODEX_API_KEY && !next.OPENAI_API_KEY) {
+    next.OPENAI_API_KEY = next.CODEX_API_KEY;
+  }
+  return next;
+}
+
+function emitProgress(emit, type, label, detail) {
+  if (typeof emit !== "function") return;
+  try {
+    emit({
+      type,
+      label: cleanText(label, 140),
+      detail: cleanProgressDetail(detail),
+      at: new Date().toISOString(),
+    });
+  } catch {
+    // Streaming progress must never fail the underlying Codex run.
+  }
+}
+
+function throttledCodexProgress(emit, label) {
+  let last = 0;
+
+  return (chunk) => {
+    if (typeof emit !== "function") return;
+    const now = Date.now();
+    if (now - last < 1200) return;
+    last = now;
+    const detail = cleanProgressDetail(chunk.toString()) || "Codex CLI is still working.";
+    emitProgress(emit, "output", label, detail);
+  };
+}
+
+function cleanProgressDetail(value) {
+  if (typeof value !== "string") return "";
+  const cleaned = value
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/sk-[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/gsk_[A-Za-z0-9_-]+/g, "[redacted]")
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.slice(0, 180);
 }
 
 function resolveCodexCommand(env) {
@@ -264,7 +334,128 @@ async function verifyGeneratedFiles(workspace, relativeFiles) {
   }
 }
 
-function inside(root, relativePath) {
+async function verifyNoUnexpectedEdits(workspace, allowedFiles, statusBefore) {
+  const status = await gitStatus(workspace);
+  if (!status) return;
+
+  const before = new Set(statusBefore.map(statusPath));
+  const allowed = new Set(allowedFiles.map(normalizeGitPath));
+  const unexpected = status
+    .map(statusPath)
+    .filter((file) => !before.has(file))
+    .filter((file) => !allowed.has(file))
+    .filter((file) => file !== "src/generated/")
+    .filter((file) => !file.startsWith(".palette/"));
+
+  const generatedFiles = await listGeneratedFiles(workspace);
+  const unexpectedGenerated = generatedFiles.filter((file) => !allowed.has(file));
+
+  if (unexpected.length > 0 || unexpectedGenerated.length > 0) {
+    const details = [...unexpected, ...unexpectedGenerated].slice(0, 5).join(", ");
+    throw httpError(500, `Codex touched files outside the Palette output boundary: ${details}.`);
+  }
+}
+
+function statusPath(line) {
+  const file = line.slice(3).trim();
+  return normalizeGitPath(file.includes(" -> ") ? file.split(" -> ").pop().trim() : file);
+}
+
+async function listGeneratedFiles(workspace) {
+  const root = inside(workspace, "src/generated");
+  if (!existsSync(root)) return [];
+
+  async function walk(directory, relativeBase = "") {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    const files = [];
+
+    for (const entry of entries) {
+      const relativePath = path.join(relativeBase, entry.name);
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...await walk(fullPath, relativePath));
+      } else if (entry.isFile()) {
+        files.push(normalizeGitPath(path.join("src/generated", relativePath)));
+      }
+    }
+
+    return files;
+  }
+
+  return walk(root);
+}
+
+function gitStatus(workspace) {
+  return new Promise((resolve) => {
+    const child = spawn("git", ["status", "--porcelain"], {
+      cwd: workspace,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let stdout = "";
+    child.stdout.on("data", (chunk) => {
+      stdout = tail(stdout + chunk.toString(), 10000);
+    });
+    child.on("error", () => resolve([]));
+    child.on("close", (code) => {
+      if (code !== 0) {
+        resolve([]);
+        return;
+      }
+      resolve(stdout.split(/\r?\n/).filter(Boolean));
+    });
+  });
+}
+
+function normalizeGitPath(value) {
+  return value.replace(/\\/g, "/").replace(/^"|"$/g, "");
+}
+
+async function boundarySnapshot(workspace, allowedFiles) {
+  const allowed = new Set(allowedFiles.map(normalizeGitPath));
+  const ignoredDirs = new Set([".git", ".palette", "dist", "node_modules", "qa"]);
+  const snapshot = new Map();
+
+  async function walk(directory, relativeBase = "") {
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+
+    for (const entry of entries) {
+      const relativePath = normalizeGitPath(path.join(relativeBase, entry.name));
+      if (entry.isDirectory()) {
+        if (ignoredDirs.has(entry.name)) continue;
+        if (relativePath === "src/generated") continue;
+        await walk(path.join(directory, entry.name), relativePath);
+        continue;
+      }
+
+      if (!entry.isFile() || allowed.has(relativePath) || relativePath === ".env") continue;
+      const content = await readFile(path.join(directory, entry.name)).catch(() => null);
+      if (content) snapshot.set(relativePath, createHash("sha256").update(content).digest("hex"));
+    }
+  }
+
+  await walk(workspace);
+  return snapshot;
+}
+
+async function verifyBoundarySnapshot(workspace, allowedFiles, before) {
+  const after = await boundarySnapshot(workspace, allowedFiles);
+  const changed = [];
+
+  for (const [file, hash] of after.entries()) {
+    if (!before.has(file) || before.get(file) !== hash) changed.push(file);
+  }
+
+  for (const file of before.keys()) {
+    if (!after.has(file)) changed.push(file);
+  }
+
+  if (changed.length > 0) {
+    throw httpError(500, `Codex changed files outside src/generated: ${changed.slice(0, 5).join(", ")}.`);
+  }
+}
+
+export function inside(root, relativePath) {
   const resolved = path.resolve(root, relativePath);
   if (!resolved.toLowerCase().startsWith(root.toLowerCase() + path.sep)) {
     throw httpError(400, "Resolved path escaped the workspace.");

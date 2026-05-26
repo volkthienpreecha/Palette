@@ -6,7 +6,6 @@ type PaletteProject = {
   name: string;
   theme: string;
   swatchAccent?: string;
-  swatchColors?: string[];
   sections: PaletteSection[];
 };
 
@@ -19,9 +18,10 @@ type PaletteSection = {
   variant?: string;
   hasWaitlist?: boolean;
   links?: PaletteLink[];
-  actions?: PaletteLink[];
+  actions?: PaletteAction[];
   features?: PaletteFeature[];
-  fields?: PaletteField[];
+  plans?: PalettePlan[];
+  footerText?: string;
 };
 
 type PaletteLink = {
@@ -29,25 +29,42 @@ type PaletteLink = {
   href?: string;
 };
 
+type PaletteAction = {
+  label: string;
+  href?: string;
+};
+
 type PaletteFeature = {
   title: string;
-  copy?: string;
+  copy: string;
   accent?: string;
 };
 
-type PaletteField = {
-  id?: string;
-  label: string;
-  type?: string;
-  placeholder?: string;
+type PalettePlan = {
+  name: string;
+  price: string;
+  copy: string;
+  featured?: boolean;
 };
 
 const paletteProject = project as PaletteProject;
 
+const fallbackFeatures: PaletteFeature[] = [
+  { title: "Measured pour", copy: "Robotic arms tune grind, heat, and timing for each order." },
+  { title: "Human calm", copy: "The room stays quiet, tactile, and easy to understand." },
+  { title: "Morning memory", copy: "Regular orders reappear before the line reaches the counter." },
+];
+
+const fallbackPlans: PalettePlan[] = [
+  { name: "Morning", price: "$6", copy: "Single cup, timed pickup." },
+  { name: "Studio", price: "$18", copy: "Three cups across a work block.", featured: true },
+  { name: "Foundry", price: "$42", copy: "Team tasting tray and notes." },
+];
+
 export function PalettePage() {
-  const style = {
-    "--swatch-accent": paletteProject.swatchAccent,
-  } as CSSProperties;
+  const style = paletteProject.swatchAccent
+    ? ({ "--swatch-accent": paletteProject.swatchAccent } as CSSProperties)
+    : undefined;
 
   return (
     <main
@@ -57,7 +74,9 @@ export function PalettePage() {
     >
       {paletteProject.sections.map((section) => (
         <section
-          className={`generated-section section-${section.kind} variant-${section.variant ?? paletteProject.theme}`}
+          className={`generated-section section-${section.kind} variant-${
+            section.variant ?? paletteProject.theme
+          }`}
           data-section-id={section.id}
           data-section-kind={section.kind}
           key={section.id}
@@ -75,26 +94,40 @@ function SectionView({ section }: { section: PaletteSection }) {
       return <NavSection section={section} />;
     case "hero":
       return <HeroSection section={section} />;
+    case "note":
+      return <NoteSection section={section} />;
     case "features":
       return <FeaturesSection section={section} />;
-    case "form":
-      return <FormSection section={section} />;
+    case "pricing":
+      return <PricingSection section={section} />;
+    case "cta":
+      return <CtaSection section={section} />;
+    case "footer":
+      return <FooterSection section={section} />;
     default:
       return <Intro section={section} />;
   }
 }
 
 function NavSection({ section }: { section: PaletteSection }) {
+  const links = section.links ?? [];
+  const action = section.actions?.[0];
+
   return (
-    <nav className="demo-nav" aria-label={section.title}>
+    <nav className="demo-nav">
       <strong>{section.title}</strong>
       <div>
-        {(section.links ?? []).map((link) => (
+        {links.map((link) => (
           <a href={link.href ?? "#"} key={link.label}>
             {link.label}
           </a>
         ))}
       </div>
+      {action ? (
+        <button type="button" onClick={() => navigateTo(action.href)}>
+          {action.label}
+        </button>
+      ) : null}
     </nav>
   );
 }
@@ -110,10 +143,14 @@ function HeroSection({ section }: { section: PaletteSection }) {
         <h2>{section.title}</h2>
         {section.subtitle ? <p>{section.subtitle}</p> : null}
         {section.hasWaitlist ? (
-          <InlineWaitlist section={section} action={primary} />
+          <InlineWaitlist section={section} />
         ) : (
           <div className="hero-actions">
-            {primary ? <button type="button">{primary.label}</button> : null}
+            {primary ? (
+              <button type="button" onClick={() => navigateTo(primary.href)}>
+                {primary.label}
+              </button>
+            ) : null}
             {secondary ? <span>{secondary.label}</span> : null}
           </div>
         )}
@@ -130,41 +167,40 @@ function HeroSection({ section }: { section: PaletteSection }) {
   );
 }
 
-function InlineWaitlist({
-  section,
-  action,
-}: {
-  section: PaletteSection;
-  action?: PaletteLink;
-}) {
+function InlineWaitlist({ section }: { section: PaletteSection }) {
   return (
     <form className="waitlist-form" onSubmit={preventSubmit}>
       <label htmlFor={`${section.id}-waitlist-email`}>Reserve a tasting</label>
       <div>
-        <input
-          id={`${section.id}-waitlist-email`}
-          name="email"
-          type="email"
-          placeholder="name@studio.com"
-        />
-        <button type="submit">{action?.label ?? "Set"}</button>
+        <input id={`${section.id}-waitlist-email`} name="email" type="email" placeholder="name@studio.com" />
+        <button type="submit">Set</button>
       </div>
     </form>
   );
 }
 
+function NoteSection({ section }: { section: PaletteSection }) {
+  return (
+    <div className="demo-note">
+      {section.eyebrow ? <span className="section-eyebrow">{section.eyebrow}</span> : null}
+      <h2>{section.title}</h2>
+      {section.subtitle ? <p>{section.subtitle}</p> : null}
+    </div>
+  );
+}
+
 function FeaturesSection({ section }: { section: PaletteSection }) {
-  const colors = paletteProject.swatchColors ?? [];
+  const features = section.features ?? fallbackFeatures;
 
   return (
     <div className="demo-features">
       <Intro section={section} />
       <div className="feature-list">
-        {(section.features ?? []).map((feature, index) => (
-          <article key={feature.title}>
-            <span style={{ background: feature.accent ?? colors[index % colors.length] }} />
-            <h3>{feature.title}</h3>
-            {feature.copy ? <p>{feature.copy}</p> : null}
+        {features.map((item) => (
+          <article key={item.title}>
+            <span style={item.accent ? { background: item.accent } : undefined} />
+            <h3>{item.title}</h3>
+            <p>{item.copy}</p>
           </article>
         ))}
       </div>
@@ -172,28 +208,47 @@ function FeaturesSection({ section }: { section: PaletteSection }) {
   );
 }
 
-function FormSection({ section }: { section: PaletteSection }) {
+function PricingSection({ section }: { section: PaletteSection }) {
+  const plans = section.plans ?? fallbackPlans;
+
   return (
-    <div className="demo-pricing demo-form">
+    <div className="demo-pricing">
       <Intro section={section} />
-      <form className="waitlist-form section-form" onSubmit={preventSubmit}>
-        {(section.fields ?? []).map((field) => {
-          const id = field.id ?? field.label.toLowerCase().replace(/\s+/g, "-");
-          return (
-            <label htmlFor={`${section.id}-${id}`} key={id}>
-              {field.label}
-              <input
-                id={`${section.id}-${id}`}
-                name={id}
-                type={field.type ?? fieldType(field.label)}
-                placeholder={field.placeholder ?? field.label}
-              />
-            </label>
-          );
-        })}
-        <button type="submit">{section.actions?.[0]?.label ?? "Submit"}</button>
-      </form>
+      <div className="pricing-list">
+        {plans.map((plan) => (
+          <article className={plan.featured ? "is-featured" : undefined} key={plan.name}>
+            <h3>{plan.name}</h3>
+            <strong>{plan.price}</strong>
+            <p>{plan.copy}</p>
+          </article>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function CtaSection({ section }: { section: PaletteSection }) {
+  const action = section.actions?.[0];
+
+  return (
+    <div className="demo-cta">
+      <h2>{section.title}</h2>
+      {section.subtitle ? <p>{section.subtitle}</p> : null}
+      {action ? (
+        <button type="button" onClick={() => navigateTo(action.href)}>
+          {action.label}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function FooterSection({ section }: { section: PaletteSection }) {
+  return (
+    <footer className="demo-footer">
+      <strong>{section.title}</strong>
+      <span>{section.footerText ?? section.subtitle}</span>
+    </footer>
   );
 }
 
@@ -207,12 +262,12 @@ function Intro({ section }: { section: PaletteSection }) {
   );
 }
 
-function fieldType(label: string) {
-  return label.toLowerCase().includes("email") ? "email" : "text";
-}
-
 function preventSubmit(event: FormEvent<HTMLFormElement>) {
   event.preventDefault();
+}
+
+function navigateTo(href?: string) {
+  if (href) window.location.href = href;
 }
 
 export default PalettePage;

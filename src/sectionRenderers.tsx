@@ -11,7 +11,8 @@ export type PaletteSectionKind =
   | "testimonials"
   | "stats"
   | "form"
-  | "gallery";
+  | "gallery"
+  | "note";
 
 export type PaletteSectionVariant =
   | "atelier"
@@ -194,6 +195,8 @@ export function PaletteSectionBody({
       return <PaletteFormSection section={section} helpers={helpers} />;
     case "gallery":
       return <PaletteGallerySection section={section} />;
+    case "note":
+      return <PaletteNoteSection section={section} />;
     default:
       return <PaletteUnknownSection section={section} />;
   }
@@ -481,6 +484,16 @@ export function PaletteGallerySection({ section }: { section: PaletteSectionMode
           </article>
         ))}
       </div>
+    </div>
+  );
+}
+
+export function PaletteNoteSection({ section }: { section: PaletteSectionModel }) {
+  return (
+    <div className="demo-note">
+      <span className="section-eyebrow">{section.eyebrow ?? "Canvas note"}</span>
+      <h2>{section.title}</h2>
+      {section.subtitle ? <p>{section.subtitle}</p> : null}
     </div>
   );
 }

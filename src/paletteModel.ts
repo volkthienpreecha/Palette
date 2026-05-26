@@ -203,6 +203,14 @@ export function parseIntent(command: string, context: CommandContext): IntentRes
     return { operations: [], status: "No brushstroke given." };
   }
 
+  const preciseOperations = preciseSectionOperationsFromText(command, text, context.project, selectedId, selected);
+  if (preciseOperations.length > 0) {
+    return {
+      operations: preciseOperations,
+      status: statusForPreciseOperations(preciseOperations),
+    };
+  }
+
   if (text.includes("portfolio") || looksLikeAtelierSite(text)) {
     return {
       operations: [{ type: "start_project", template: "portfolio" }],
@@ -306,7 +314,7 @@ export function parseIntent(command: string, context: CommandContext): IntentRes
   }
 
   if (text.includes("set paint") || text.includes("export")) {
-    return { operations: [{ type: "export_project" }], status: "Set the paint into a project bundle." };
+    return { operations: [{ type: "export_project" }], status: "Downloaded palette-project.json." };
   }
 
   const id = selectedId ?? firstSectionId(context.project, "hero");
@@ -380,7 +388,7 @@ export function applyOperation(project: PaletteProject, operation: PaletteOperat
       return commit(next, snapshot, "Swatch pinned", "A reference was mixed into the canvas.");
     case "export_project":
       next.exportText = createExportBundle(next);
-      return commit(next, snapshot, "Paint set", "A project bundle is ready to save.");
+      return commit(next, snapshot, "Paint set", "Downloaded palette-project.json.");
     default:
       return { project, status: "No operation was applied." };
   }
@@ -460,6 +468,7 @@ export function sectionStatus(section: PaletteSectionModel, index: number): stri
   if (section.kind === "testimonials") return "Pinning studio notes to the canvas.";
   if (section.kind === "gallery") return "Painting a gallery from the reference swatches.";
   if (section.kind === "form") return "Adding a form path for the next action.";
+  if (section.kind === "note") return "Pinning a hand-written note beside the selected section.";
   if (section.kind === "cta") return "Varnishing the final call to action.";
   if (section.kind === "footer") return "Setting the final studio mark.";
   return `Painting section ${index + 1}.`;
@@ -616,6 +625,8 @@ function SectionView({ section }: { section: PaletteSection }) {
       return <FormSection section={section} />;
     case "gallery":
       return <GallerySection section={section} />;
+    case "note":
+      return <NoteSection section={section} />;
     case "cta":
       return <CtaSection section={section} />;
     case "footer":
@@ -716,6 +727,10 @@ function GallerySection({ section }: { section: PaletteSection }) {
       <div className="feature-list gallery-list">{(section.gallery ?? []).map((item) => <article key={item.title}><div className="swatch-image">{item.imageUrl ? <img src={item.imageUrl} alt={item.imageAlt ?? item.title} /> : <span />}</div><h3>{item.title}</h3>{item.copy ? <p>{item.copy}</p> : null}</article>)}</div>
     </div>
   );
+}
+
+function NoteSection({ section }: { section: PaletteSection }) {
+  return <div className="demo-note">{section.eyebrow ? <span className="section-eyebrow">{section.eyebrow}</span> : null}<h2>{section.title}</h2>{section.subtitle ? <p>{section.subtitle}</p> : null}</div>;
 }
 
 function CtaSection({ section }: { section: PaletteSection }) {
@@ -829,6 +844,22 @@ function formSection(title = "Reserve a tasting", subtitle = "Leave a note and P
   };
 }
 
+function contactSection(): PaletteSectionModel {
+  return formSection("Contact the studio", "Send a note, collaboration idea, or request for the next study.");
+}
+
+function noteSection(note: string, target?: PaletteSectionModel): PaletteSectionModel {
+  const targetLabel = target ? `${target.kind} section` : "canvas";
+  return {
+    id: uniqueId("note"),
+    kind: "note",
+    title: "Studio note",
+    subtitle: note || "Keep this direction visible while Palette keeps painting.",
+    eyebrow: `Pinned to ${targetLabel}`,
+    variant: "atelier",
+  };
+}
+
 function ctaSection(title: string, subtitle: string): PaletteSectionModel {
   return {
     id: uniqueId("cta"),
@@ -871,6 +902,97 @@ function looksLikeAtelierSite(text: string) {
   return siteIntent && atelierSubject;
 }
 
+function preciseSectionOperationsFromText(
+  command: string,
+  text: string,
+  project: PaletteProject,
+  selectedId: string | null,
+  selected?: PaletteSectionModel,
+): PaletteOperation[] {
+  const operations: PaletteOperation[] = [];
+  const targetId = selectedId ?? firstSectionId(project, "hero");
+  const noteText = extractNoteText(command);
+
+  if (noteText) {
+    operations.push({
+      type: "add_section",
+      section: noteSection(noteText, selected),
+      afterId: selectedId ?? undefined,
+    });
+  }
+
+  const title = extractRewriteText(command, [
+    /\b(?:change|set|make|rewrite)\s+(?:the\s+)?(?:headline|title|heading)\s+(?:to|as)\s+(.+)$/i,
+    /\b(?:headline|title|heading)\s*:\s*(.+)$/i,
+    /\bmake\s+(?:this|it|section)\s+say\s+(.+)$/i,
+  ]);
+  if (targetId && title) {
+    operations.push({ type: "update_section", id: targetId, patch: { title } });
+  }
+
+  const subtitle = extractRewriteText(command, [
+    /\b(?:change|set|make|rewrite)\s+(?:the\s+)?(?:subtitle|subhead|copy|body|description)\s+(?:to|as)\s+(.+)$/i,
+    /\b(?:subtitle|subhead|copy|body|description)\s*:\s*(.+)$/i,
+  ]);
+  if (targetId && subtitle) {
+    operations.push({ type: "update_section", id: targetId, patch: { subtitle } });
+  }
+
+  const variant = selectedId ? variantFromText(text) : undefined;
+  if (selectedId && variant) {
+    operations.push({ type: "set_variant", id: selectedId, variant });
+  }
+
+  return operations;
+}
+
+function extractNoteText(command: string): string {
+  return extractRewriteText(command, [
+    /\b(?:add|pin|write|leave)\s+(?:a\s+)?note(?:\s+(?:that|says|about))?\s*:?\s*(.+)$/i,
+    /^note\s*:?\s*(.+)$/i,
+  ]);
+}
+
+function extractRewriteText(command: string, patterns: RegExp[]): string {
+  for (const pattern of patterns) {
+    const match = command.match(pattern);
+    if (match?.[1]) return cleanFreeform(match[1]);
+  }
+  return "";
+}
+
+function cleanFreeform(value: string): string {
+  return value
+    .replace(/^[\s"']+|[\s"']+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 180);
+}
+
+function variantFromText(text: string): PaletteSectionVariant | undefined {
+  if (text.includes("playful") || text.includes("fun")) return "playful";
+  if (text.includes("minimal") || text.includes("quieter") || text.includes("simple")) return "minimal";
+  if (text.includes("glass") || text.includes("glassy") || text.includes("liquid")) return "glass";
+  if (text.includes("editorial") || text.includes("atelier") || text.includes("classic")) return "editorial";
+  if (text.includes("darker") || text.includes("premium") || text.includes("apple") || text.includes("luxury")) {
+    return "premium";
+  }
+  return undefined;
+}
+
+function statusForPreciseOperations(operations: PaletteOperation[]) {
+  if (operations.some((operation) => operation.type === "add_section" && operation.section.kind === "note")) {
+    return "Pinned a note beside the selected section.";
+  }
+  if (operations.some((operation) => operation.type === "update_section")) {
+    return "Repainted the selected wording.";
+  }
+  if (operations.some((operation) => operation.type === "set_variant")) {
+    return "Changed only the selected section.";
+  }
+  return "Painted the selected canvas change.";
+}
+
 function sectionOperationsFromText(
   text: string,
   project: PaletteProject,
@@ -903,7 +1025,9 @@ function sectionOperationsFromText(
     operations.push({ type: "add_section", section: statsSection(), afterId });
   }
 
-  if (text.includes("form") || text.includes("contact")) {
+  if (text.includes("contact")) {
+    operations.push({ type: "add_section", section: contactSection(), afterId });
+  } else if (text.includes("form")) {
     operations.push({ type: "add_section", section: formSection(), afterId });
   }
 
@@ -921,6 +1045,7 @@ function statusForSectionOperation(operation: PaletteOperation) {
   if (operation.section.kind === "gallery") return "Painted a gallery strip from the reference language.";
   if (operation.section.kind === "stats") return "Added a small structure strip to the canvas.";
   if (operation.section.kind === "form") return "Painted a form section.";
+  if (operation.section.kind === "note") return "Pinned a note beside the selected section.";
   if (operation.section.kind === "pricing") return "Framed a pricing section.";
   return "Painted a new section.";
 }

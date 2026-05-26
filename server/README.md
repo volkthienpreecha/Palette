@@ -27,6 +27,8 @@ $env:OPENAI_API_KEY="sk-..."
 npm run api
 ```
 
+`npm run api` also loads a local `.env` file from the project root, so you can keep `OPENAI_API_KEY`, `GROQ_API_KEY`, and local demo flags there.
+
 Then start the Vite app with the remote bridge enabled:
 
 ```powershell
@@ -78,4 +80,50 @@ Safety boundary: this endpoint only runs on the local backend, validates the pro
 ```powershell
 $env:PALETTE_CODEX_DRY_RUN="1"
 npm run api
+```
+
+## Folder Store
+
+`POST /api/projects/save` saves the current canvas into a timestamped folder under:
+
+```text
+.palette/projects/
+```
+
+Each folder contains:
+
+```text
+project.json
+codex-notes.md
+```
+
+Enable the frontend button with:
+
+```js
+localStorage.setItem("palette:project-store", "1");
+location.reload();
+```
+
+This is the MVP database. It is local, inspectable, and Codex-readable without auth or a hosted service.
+
+## Voice Strokes
+
+`POST /api/voice/transcribe` accepts a browser-recorded audio blob and sends it to Groq's OpenAI-compatible transcription endpoint. Set the key only in your shell:
+
+```powershell
+$env:GROQ_API_KEY="..."
+npm run api
+```
+
+Enable the frontend voice bridge with:
+
+```js
+localStorage.setItem("palette:voice-api", "1");
+location.reload();
+```
+
+The default model is `whisper-large-v3-turbo`. Override it with:
+
+```powershell
+$env:GROQ_TRANSCRIBE_MODEL="whisper-large-v3"
 ```

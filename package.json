@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "api": "node server/index.mjs",
-    "check:server": "node --check server/index.mjs && node --check server/paletteIntent.mjs && node --check server/codexApply.mjs",
+    "check:server": "node --check server/index.mjs && node --check server/paletteIntent.mjs && node --check server/codexApply.mjs && node --check server/projectStore.mjs && node --check server/groqVoice.mjs && node --check server/env.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
