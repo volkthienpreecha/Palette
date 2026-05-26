@@ -9,7 +9,7 @@
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
-  background: oklch(0.958 0.012 77);
+  background: oklch(0.075 0.008 72);
   color: oklch(0.22 0.018 72);
 
   /* Color tokens */
@@ -19,9 +19,9 @@
   --ink: oklch(0.22 0.018 72);
   --charcoal: oklch(0.43 0.016 71);
   --line: oklch(0.78 0.022 76);
-  --cobalt: oklch(0.48 0.126 250);
+  --cobalt: oklch(0.2 0.012 72);
   --swatch-accent: var(--cobalt);
-  --cobalt-soft: oklch(0.91 0.034 249);
+  --cobalt-soft: oklch(0.86 0.01 76);
   --vermilion: oklch(0.58 0.15 35);
   --gold: oklch(0.71 0.09 82);
   --glass-dark: color-mix(in oklch, var(--ink) 88%, transparent);
@@ -43,6 +43,7 @@ html, body, #root {
 
 body {
   overflow-x: hidden;
+  background: oklch(0.075 0.008 72);
 }
 
 button, textarea, input {
@@ -77,8 +78,8 @@ h1, h2, h3 {
   --ink: oklch(0.955 0.012 80);
   --charcoal: oklch(0.745 0.018 78);
   --line: oklch(0.455 0.03 74);
-  --cobalt: oklch(0.7 0.11 247);
-  --cobalt-soft: oklch(0.31 0.05 247);
+  --cobalt: oklch(0.2 0.012 72);
+  --cobalt-soft: oklch(0.36 0.016 72);
   --vermilion: oklch(0.7 0.14 35);
   --glass-dark: color-mix(in oklch, oklch(0.105 0.014 72) 88%, transparent);
   --glass-light: color-mix(in oklch, oklch(0.25 0.018 74) 78%, transparent);
@@ -94,28 +95,29 @@ h1, h2, h3 {
   padding: 24px;
   color: var(--ink);
   background:
-    linear-gradient(115deg, color-mix(in oklch, var(--canvas) 92%, var(--gold)) 0%, var(--canvas) 44%, oklch(0.935 0.012 91) 100%),
-    var(--canvas);
+    linear-gradient(118deg, color-mix(in oklch, oklch(1 0 0) 7%, transparent) 0%, transparent 29%, color-mix(in oklch, oklch(1 0 0) 5%, transparent) 44%, transparent 63%),
+    linear-gradient(145deg, oklch(0.055 0.008 72) 0%, oklch(0.15 0.014 72) 45%, oklch(0.075 0.009 72) 100%);
   isolation: isolate;
 }
 
 .theme-premium.app-shell {
   background:
-    linear-gradient(128deg, oklch(0.13 0.012 68) 0%, var(--canvas) 48%, oklch(0.09 0.01 68) 100%),
-    repeating-linear-gradient(102deg, color-mix(in oklch, var(--gold) 4%, transparent) 0 1px, transparent 1px 38px);
+    linear-gradient(118deg, color-mix(in oklch, oklch(1 0 0) 7%, transparent) 0%, transparent 29%, color-mix(in oklch, oklch(1 0 0) 5%, transparent) 44%, transparent 63%),
+    linear-gradient(145deg, oklch(0.055 0.008 72) 0%, oklch(0.15 0.014 72) 45%, oklch(0.075 0.009 72) 100%);
 }
 
-/* Fixed background texture — laid paper grain */
+/* Fixed premium glass texture */
 .atelier-wash {
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
   background:
-    repeating-linear-gradient(0deg, color-mix(in oklch, var(--ink) 2.8%, transparent) 0 1px, transparent 1px 28px),
-    repeating-linear-gradient(90deg, color-mix(in oklch, var(--line) 8%, transparent) 0 1px, transparent 1px 96px);
-  mask-image: linear-gradient(to bottom, black, transparent 80%);
-  opacity: 0.45;
+    linear-gradient(118deg, transparent 0 30%, color-mix(in oklch, oklch(1 0 0) 7%, transparent) 42%, transparent 58%),
+    repeating-linear-gradient(0deg, color-mix(in oklch, oklch(1 0 0) 4%, transparent) 0 1px, transparent 1px 28px),
+    repeating-linear-gradient(90deg, color-mix(in oklch, oklch(1 0 0) 3%, transparent) 0 1px, transparent 1px 96px);
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+  opacity: 0.72;
 }
 
 /* ── Studio header ───────────────────────────────────────── */
@@ -135,7 +137,8 @@ h1, h2, h3 {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--cobalt);
+  color: #fff;
+  text-shadow: 0 1px 12px color-mix(in oklch, var(--ink) 34%, transparent);
 }
 
 .studio-header h1 {
@@ -144,7 +147,7 @@ h1, h2, h3 {
   font-size: 38px;
   font-weight: 300;
   line-height: 1.06;
-  color: var(--ink);
+  color: oklch(0.985 0.006 80);
 }
 
 .header-actions {
@@ -225,7 +228,7 @@ h1, h2, h3 {
   align-items: stretch;
 }
 
-/* ── Swatch panel (flat, not glass) ──────────────────────── */
+/* ── Swatch panel ────────────────────────────────────────── */
 
 .swatch-panel {
   position: sticky;
@@ -235,12 +238,14 @@ h1, h2, h3 {
   border-radius: 22px;
   padding: 16px;
   border: 1px solid color-mix(in oklch, var(--line) 60%, transparent);
-  background: var(--paper);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--paper) 82%, transparent), color-mix(in oklch, var(--plaster) 58%, transparent)),
+    color-mix(in oklch, var(--paper) 72%, transparent);
   box-shadow: var(--shadow-small);
+  backdrop-filter: blur(24px) saturate(1.08);
 }
 
-/* Floating glass surfaces: corgi, command, interview */
-.corgi-guide,
+/* Floating glass surfaces: command and interview */
 .command-expanded,
 .command-compact,
 .interview-card {
@@ -496,24 +501,44 @@ h1, h2, h3 {
 .canvas-zone {
   position: relative;
   min-width: 0;
+  isolation: isolate;
+}
+
+.sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .canvas-board {
   position: relative;
+  z-index: 1;
   min-height: calc(100vh - 114px);
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--line) 72%, transparent);
   border-radius: 28px;
   background:
-    linear-gradient(180deg, color-mix(in oklch, var(--paper) 94%, transparent), color-mix(in oklch, var(--plaster) 52%, transparent)),
-    var(--paper);
-  box-shadow: var(--shadow-soft);
+    linear-gradient(180deg, color-mix(in oklch, var(--paper) 88%, transparent), color-mix(in oklch, var(--plaster) 56%, transparent)),
+    color-mix(in oklch, var(--paper) 78%, transparent);
+  box-shadow:
+    var(--shadow-soft),
+    inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 36%, transparent);
+  backdrop-filter: blur(28px) saturate(1.08);
   transition: border-color 400ms ease, box-shadow 400ms ease;
 }
 
 .canvas-board.is-painting {
   border-color: color-mix(in oklch, var(--cobalt) 36%, var(--line));
   animation: canvasPulse 2.6s ease-in-out infinite;
+}
+
+.canvas-board.is-repainting .generated-page {
+  filter: saturate(0.9) blur(1px);
+  opacity: 0.74;
 }
 
 /* Laid paper texture — horizontal fibers only */
@@ -547,6 +572,10 @@ h1, h2, h3 {
   opacity: 0.55;
 }
 
+.canvas-board.is-repainting::after {
+  opacity: 0.72;
+}
+
 @keyframes washSweep {
   0% { transform: translateX(-65%); }
   100% { transform: translateX(72%); }
@@ -567,21 +596,11 @@ h1, h2, h3 {
   text-align: center;
 }
 
-/* Push blank canvas content below the floating status rail (~146px) */
+/* Keep blank canvas content clear of the floating status rail. */
 .blank-canvas {
-  padding: clamp(152px, 19vh, 200px) 48px 48px;
+  padding: clamp(86px, 11vh, 118px) 48px 48px;
 }
 
-
-.blank-ring {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
-  border-radius: 50%;
-  color: color-mix(in oklch, var(--charcoal) 72%, transparent);
-}
 
 .blank-canvas h2 {
   margin: 0;
@@ -675,11 +694,12 @@ h1, h2, h3 {
   gap: 14px;
   max-width: 1180px;
   margin: 0 auto;
-  padding: 168px clamp(18px, 3vw, 42px) 72px;
+  padding: 88px clamp(18px, 3vw, 42px) 72px;
 }
 
 .generated-section {
   position: relative;
+  --section-title-boost: 0px;
   border: 1px solid transparent;
   border-radius: 20px;
   color: var(--ink);
@@ -799,7 +819,7 @@ h1, h2, h3 {
 .demo-nav strong,
 .demo-footer strong {
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: calc(22px + var(--section-title-boost));
   font-weight: 400;
 }
 
@@ -835,10 +855,11 @@ h1, h2, h3 {
   align-self: center;
 }
 
+.hero-copy h1,
 .hero-copy h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(38px, 4.5vw, 56px);
+  font-size: calc(clamp(38px, 4.5vw, 56px) + var(--section-title-boost));
   font-style: italic;
   font-weight: 300;
   line-height: 1.02;
@@ -878,6 +899,25 @@ h1, h2, h3 {
     linear-gradient(180deg, color-mix(in oklch, oklch(1 0 0) 16%, transparent), transparent 45%),
     color-mix(in oklch, var(--plaster) 76%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 35%, transparent);
+}
+
+.coffee-study.has-reference-image {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 30px;
+  padding: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in oklch, oklch(1 0 0) 8%, transparent), transparent 42%),
+    oklch(0.02 0 0);
+}
+
+.coffee-reference-image {
+  width: 100%;
+  height: 100%;
+  min-height: 270px;
+  object-fit: contain;
+  display: block;
 }
 
 .robot-arm {
@@ -1028,7 +1068,7 @@ h1, h2, h3 {
 .demo-cta h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(28px, 3.5vw, 38px);
+  font-size: calc(clamp(28px, 3.5vw, 38px) + var(--section-title-boost));
   font-weight: 300;
   line-height: 1.06;
   color: var(--ink);
@@ -1440,7 +1480,7 @@ h1, h2, h3 {
 .demo-note h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: calc(30px + var(--section-title-boost));
   font-weight: 400;
   line-height: 1.12;
   color: var(--ink);
@@ -1469,7 +1509,7 @@ h1, h2, h3 {
 
 /* Playful variant */
 .variant-playful {
-  --cobalt: oklch(0.63 0.15 217);
+  --cobalt: oklch(0.2 0.012 72);
   --vermilion: oklch(0.69 0.15 35);
   border-radius: 28px;
 }
@@ -1512,6 +1552,7 @@ h1, h2, h3 {
   opacity: 0.28;
 }
 
+.variant-minimal .hero-copy h1,
 .variant-minimal .hero-copy h2,
 .variant-minimal .demo-features h2,
 .variant-minimal .demo-pricing h2,
@@ -1556,6 +1597,7 @@ h1, h2, h3 {
   border-color: transparent;
 }
 
+.variant-editorial .hero-copy h1,
 .variant-editorial .hero-copy h2,
 .variant-editorial .demo-features h2,
 .variant-editorial .demo-pricing h2,
@@ -1586,7 +1628,7 @@ h1, h2, h3 {
 }
 
 .variant-editorial .feature-list article::before {
-  color: oklch(0.62 0.1 247);
+  color: oklch(0.78 0.012 76);
 }
 
 .variant-editorial .pricing-list article {
@@ -1595,9 +1637,9 @@ h1, h2, h3 {
 }
 
 .variant-editorial .pricing-list article.is-featured {
-  border-color: oklch(0.55 0.12 247);
+  border-color: oklch(0.42 0.018 72);
   background:
-    linear-gradient(145deg, color-mix(in oklch, oklch(0.5 0.12 247) 14%, transparent), transparent 48%),
+    linear-gradient(145deg, color-mix(in oklch, oklch(1 0 0) 10%, transparent), transparent 48%),
     oklch(0.27 0.02 70);
 }
 
@@ -1608,7 +1650,7 @@ h1, h2, h3 {
 }
 
 .variant-editorial .testimonial-list article::before {
-  color: oklch(0.62 0.1 247);
+  color: oklch(0.78 0.012 76);
 }
 
 .variant-editorial .gallery-list article {
@@ -1629,87 +1671,26 @@ h1, h2, h3 {
   border-color: oklch(0.38 0.02 72);
 }
 
-/* ── Corgi guide ─────────────────────────────────────────── */
-
-.corgi-guide {
-  position: absolute;
-  left: 22px;
-  top: 18px;
-  z-index: 8;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: min(390px, calc(100% - 44px));
-  min-height: 76px;
-  border-radius: 999px;
-  padding: 8px 18px 8px 8px;
-}
-
-.corgi-sprite {
-  width: 56px;
-  height: 56px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background-image: url("/assets/corgi-spritesheet.webp");
-  background-repeat: no-repeat;
-  background-size: 620px auto;
-  background-position: 0 0;
-  image-rendering: pixelated;
-  background-color: color-mix(in oklch, var(--paper) 72%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--line) 72%, transparent);
-}
-
-.corgi-painting .corgi-sprite,
-.corgi-done .corgi-sprite {
-  background-position: -56px 0;
-}
-
-.corgi-paused .corgi-sprite {
-  background-position: -112px 0;
-}
-
-.corgi-guide > span,
-.corgi-guide > div > span {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--charcoal);
-}
-
-.corgi-guide > div {
-  min-width: 0;
-}
-
-.corgi-guide p {
-  margin: 3px 0 0;
-  color: var(--ink);
-  font-size: 13px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
 /* ── Status rail ─────────────────────────────────────────── */
 
 .status-rail {
   position: absolute;
-  top: 112px;
+  top: 24px;
   left: 24px;
   right: 24px;
-  z-index: 7;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
   margin: 0;
   padding: 8px;
   list-style: none;
-  color: color-mix(in oklch, var(--charcoal) 80%, transparent);
-  border: 1px solid color-mix(in oklch, var(--line) 60%, transparent);
+  color: oklch(0.96 0.008 82);
+  border: 1px solid color-mix(in oklch, oklch(1 0 0) 18%, transparent);
   border-radius: 999px;
   background:
-    linear-gradient(180deg, color-mix(in oklch, oklch(1 0 0) 24%, transparent), transparent 58%),
-    var(--glass-light);
+    linear-gradient(180deg, color-mix(in oklch, oklch(1 0 0) 22%, transparent), transparent 56%),
+    var(--glass-dark);
   box-shadow: var(--shadow-small);
   backdrop-filter: blur(18px);
   font-size: 11px;
@@ -1721,11 +1702,14 @@ h1, h2, h3 {
 .status-rail li {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  opacity: 0.55;
+  min-width: 0;
+  opacity: 0.74;
   padding: 5px 8px;
   border-radius: 999px;
   white-space: nowrap;
+  text-align: center;
 }
 
 .status-rail li span {
@@ -1737,7 +1721,7 @@ h1, h2, h3 {
 }
 
 .status-rail li.active {
-  color: var(--cobalt);
+  color: oklch(0.99 0.006 82);
   opacity: 1;
 }
 
@@ -1746,7 +1730,7 @@ h1, h2, h3 {
 }
 
 .status-rail li.done {
-  color: var(--ink);
+  color: oklch(0.99 0.006 82);
   opacity: 1;
 }
 
@@ -1809,6 +1793,14 @@ h1, h2, h3 {
     0 24px 70px color-mix(in oklch, oklch(0.08 0.01 72) 36%, transparent);
 }
 
+.command-expanded.is-listening {
+  border-color: color-mix(in oklch, var(--vermilion) 62%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 22%, transparent),
+    0 24px 70px color-mix(in oklch, oklch(0.08 0.01 72) 36%, transparent),
+    0 0 0 4px color-mix(in oklch, var(--vermilion) 14%, transparent);
+}
+
 .command-topline {
   display: flex;
   align-items: center;
@@ -1865,6 +1857,27 @@ h1, h2, h3 {
   color: color-mix(in oklch, oklch(1 0 0) 38%, transparent);
 }
 
+.voice-meter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  min-height: 20px;
+  margin: -4px 2px 10px;
+}
+
+.voice-meter span {
+  width: 4px;
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--vermilion) 80%, oklch(1 0 0));
+  animation: voiceBar 0.72s ease-in-out infinite;
+}
+
+.voice-meter span:nth-child(2) { animation-delay: 0.08s; }
+.voice-meter span:nth-child(3) { animation-delay: 0.16s; }
+.voice-meter span:nth-child(4) { animation-delay: 0.24s; }
+
 .command-actions {
   display: flex;
   justify-content: flex-end;
@@ -1879,7 +1892,7 @@ h1, h2, h3 {
 }
 
 .command-actions .send-stroke:hover {
-  background: oklch(0.52 0.13 250);
+  background: oklch(0.145 0.012 72);
 }
 
 .command-actions button:disabled {
@@ -1889,9 +1902,26 @@ h1, h2, h3 {
 }
 
 .command-actions .is-listening {
+  position: relative;
   color: oklch(0.98 0.008 82);
   background: var(--vermilion);
   border-color: transparent;
+  isolation: isolate;
+}
+
+.command-actions .is-listening::before,
+.command-actions .is-listening::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border: 1px solid color-mix(in oklch, var(--vermilion) 70%, transparent);
+  border-radius: inherit;
+  animation: micSignal 1.25s ease-out infinite;
+}
+
+.command-actions .is-listening::after {
+  animation-delay: 0.4s;
 }
 
 /* ── Hidden file input ───────────────────────────────────── */
@@ -1975,6 +2005,28 @@ h1, h2, h3 {
 
 /* ── App shell entry sequence ────────────────────────────── */
 
+@keyframes micSignal {
+  0% {
+    opacity: 0.8;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
+}
+
+@keyframes voiceBar {
+  0%, 100% {
+    opacity: 0.62;
+    transform: scaleY(0.6);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1.55);
+  }
+}
+
 .studio-header {
   animation: slideDownIn 0.44s var(--ease-out-expo) 0.04s both;
 }
@@ -1987,18 +2039,7 @@ h1, h2, h3 {
   animation: slideUpIn 0.46s var(--ease-out-expo) 0.08s both;
 }
 
-.corgi-guide {
-  animation: slideLeftIn 0.40s var(--ease-out-expo) 0.20s both;
-}
-
 /* ── Blank canvas content stagger ────────────────────────── */
-
-.blank-ring {
-  will-change: transform;
-  animation:
-    scaleUpIn 0.42s var(--ease-out-expo) 0.24s both,
-    breathe 4.8s ease-in-out 0.66s infinite;
-}
 
 .blank-canvas h2 {
   animation: slideUpIn 0.42s var(--ease-out-expo) 0.32s both;
@@ -2090,6 +2131,7 @@ h1, h2, h3 {
 
 /* ── Hero content stagger ────────────────────────────────── */
 
+.demo-hero .hero-copy h1,
 .demo-hero .hero-copy h2 {
   animation: slideUpIn 0.42s var(--ease-out-expo) 0.22s both;
 }
@@ -2251,7 +2293,7 @@ h1, h2, h3 {
   }
 
   .blank-canvas {
-    padding: 108px 24px 40px;
+    padding: 72px 24px 40px;
   }
 
   .blank-canvas h2 {
@@ -2263,15 +2305,7 @@ h1, h2, h3 {
   }
 
   .generated-page {
-    padding: 128px 12px 96px;
-  }
-
-  .corgi-guide {
-    left: 12px;
-    top: 12px;
-    right: 12px;
-    max-width: none;
-    border-radius: 24px;
+    padding: 72px 12px 96px;
   }
 
   .status-rail {
@@ -2295,8 +2329,9 @@ h1, h2, h3 {
     padding: 28px 20px 34px;
   }
 
+  .hero-copy h1,
   .hero-copy h2 {
-    font-size: clamp(32px, 7vw, 44px);
+    font-size: calc(clamp(32px, 7vw, 44px) + var(--section-title-boost));
   }
 
   .coffee-study {

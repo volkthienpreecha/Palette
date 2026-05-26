@@ -16,11 +16,15 @@ const sectionVariants = new Set(["atelier", "premium", "playful", "minimal", "gl
 const templates = new Set(["robot-coffee", "portfolio", "studio-saas"]);
 const themes = new Set(["atelier", "premium"]);
 const fieldTypes = new Set(["text", "email", "tel", "url"]);
+const robotCoffeeReference = "/robot-coffee-reference.png";
 const patchKeys = new Set([
   "title",
   "subtitle",
   "eyebrow",
   "variant",
+  "titleSizeBoost",
+  "imageUrl",
+  "imageAlt",
   "hasWaitlist",
   "footerText",
   "actions",
@@ -216,7 +220,7 @@ function parseLocalIntent({ command, selectedId, project }) {
     return { operations: [{ type: "export_project" }], status: "Local parser set the paint into a bundle." };
   }
 
-  const id = selectedId ?? firstSectionId(project, "hero");
+  const id = selectedId ?? firstSectionId(project, "hero") ?? firstAnySectionId(project);
   if (id && (text.includes("headline") || text.includes("title"))) {
     return {
       operations: [{ type: "update_section", id, patch: { title: toTitle(command.replace(/headline|title/gi, "")) } }],
@@ -236,6 +240,9 @@ function shouldPreferLocal({ command, selectedId }) {
     text.includes("pin note") ||
     text.includes("headline") ||
     text.includes("title:") ||
+    text.includes("bigger") ||
+    text.includes("picture") ||
+    text.includes("image") ||
     text.includes("subtitle") ||
     text.includes("copy:") ||
     text.includes("delete") ||
@@ -247,14 +254,53 @@ function shouldPreferLocal({ command, selectedId }) {
 
 function preciseSectionOperationsFromText(command, text, project, selectedId, selected) {
   const operations = [];
-  const targetId = selectedId ?? firstSectionId(project, "hero");
+  const targetId = selectedId ?? firstSectionId(project, "hero") ?? firstAnySectionId(project);
   const noteText = extractNoteText(command);
+  const imageTarget = imageTargetSection(project, selectedId);
 
   if (noteText) {
     operations.push({
       type: "add_section",
       section: noteSection(noteText, selected),
       afterId: selectedId ?? undefined,
+    });
+  }
+
+  if (targetId && wantsLargerTitle(text)) {
+    operations.push({
+      type: "update_section",
+      id: targetId,
+      patch: { titleSizeBoost: nextTitleBoost(selected) },
+    });
+  }
+
+  if (imageTarget && wantsBetterImage(text)) {
+    operations.push({
+      type: "update_section",
+      id: imageTarget.id,
+      patch: imagePatchForSection(imageTarget, project),
+    });
+  }
+
+  const heroId = firstSectionId(project, "hero") ?? targetId;
+  if (heroId && wantsShorterSharperCopy(text)) {
+    operations.push({
+      type: "update_section",
+      id: heroId,
+      patch: {
+        subtitle: "Fast robot coffee, quiet studio service, ready before the morning rush.",
+      },
+    });
+  }
+
+  if (targetId && wantsPremiumSection(text)) {
+    operations.push({
+      type: "update_section",
+      id: targetId,
+      patch: {
+        variant: "glass",
+        eyebrow: "Premium service pass",
+      },
     });
   }
 
@@ -318,16 +364,112 @@ function variantFromText(text) {
 }
 
 function statusForPreciseOperations(operations) {
+  if (
+    operations.some(
+      (operation) =>
+        operation.type === "update_section" &&
+        ("titleSizeBoost" in operation.patch || "imageUrl" in operation.patch || "gallery" in operation.patch),
+    )
+  ) {
+    return "Local parser repainted the selected section from the note.";
+  }
   if (operations.some((operation) => operation.type === "add_section" && operation.section.kind === "note")) {
     return "Local parser pinned a note beside the selected section.";
   }
   if (operations.some((operation) => operation.type === "update_section")) {
+    if (
+      operations.some(
+        (operation) =>
+          operation.type === "update_section" &&
+          ("variant" in operation.patch || "eyebrow" in operation.patch),
+      )
+    ) {
+      return "Local parser repainted the selected section finish.";
+    }
     return "Local parser repainted the selected wording.";
   }
   if (operations.some((operation) => operation.type === "set_variant")) {
     return "Local parser changed only the selected section.";
   }
   return "Local parser painted the selected canvas change.";
+}
+
+function wantsLargerTitle(text) {
+  return (
+    (text.includes("bigger") || text.includes("larger") || text.includes("increase")) &&
+    (text.includes("title") || text.includes("headline") || text.includes("heading") || text.includes("text"))
+  );
+}
+
+function nextTitleBoost(selected) {
+  return Math.min(18, (Number(selected?.titleSizeBoost) || 0) + 6);
+}
+
+function wantsBetterImage(text) {
+  return (
+    (text.includes("picture") || text.includes("image") || text.includes("photo") || text.includes("visual")) &&
+    (text.includes("better") || text.includes("change") || text.includes("replace") || text.includes("swap"))
+  );
+}
+
+function wantsShorterSharperCopy(text) {
+  return (
+    (text.includes("copy") || text.includes("subtitle") || text.includes("description") || text.includes("body")) &&
+    (text.includes("shorter") || text.includes("sharper") || text.includes("tighter"))
+  );
+}
+
+function wantsPremiumSection(text) {
+  return text.includes("premium") && (text.includes("section") || text.includes("feel") || text.includes("this"));
+}
+
+function imageTargetSection(project, selectedId) {
+  const sections = Array.isArray(project.sections) ? project.sections : [];
+  const selected = selectedId ? sections.find((section) => section.id === selectedId) : undefined;
+  if (selected?.kind === "hero" || selected?.kind === "gallery") return selected;
+  return sections.find((section) => section.kind === "hero") ?? sections.find((section) => section.kind === "gallery");
+}
+
+function imagePatchForSection(section, project) {
+  const reference = latestImageReference(project);
+  if (section.kind === "gallery") {
+    const gallery = Array.isArray(section.gallery) && section.gallery.length > 0
+      ? section.gallery
+      : [
+          { title: "Robot coffee study", copy: "A softer machine reference for the canvas." },
+          { title: "Counter rhythm", copy: "Warm service with a mechanical assistant." },
+          { title: "Morning pour", copy: "A clearer visual note for the section." },
+        ];
+
+    return {
+      gallery: gallery.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              title: reference.title,
+              copy: "A cleaner robot-and-espresso reference for this canvas.",
+              imageUrl: reference.url,
+              imageAlt: reference.alt,
+            }
+          : item,
+      ),
+    };
+  }
+
+  return {
+    imageUrl: reference.url,
+    imageAlt: reference.alt,
+    eyebrow: section.eyebrow ?? "Reference upgraded",
+  };
+}
+
+function latestImageReference(project) {
+  const swatch = Array.isArray(project.swatches) ? project.swatches.find((item) => item?.url) : undefined;
+  return {
+    url: swatch?.url ?? robotCoffeeReference,
+    alt: swatch?.title || "Robot assistant beside an espresso machine",
+    title: swatch?.title || "Robot coffee study",
+  };
 }
 
 async function callOpenAI(request, env) {
@@ -511,6 +653,11 @@ function sanitizePatch(patch) {
       if (value) cleaned[key] = value;
     }
 
+    if (key === "titleSizeBoost" && typeof patch[key] === "number" && Number.isFinite(patch[key])) {
+      cleaned.titleSizeBoost = Math.max(0, Math.min(24, patch[key]));
+    }
+    if (key === "imageUrl") cleaned.imageUrl = cleanHref(patch[key]);
+    if (key === "imageAlt") cleaned.imageAlt = cleanText(patch[key], 70);
     if (key === "variant" && sectionVariants.has(patch[key])) cleaned.variant = patch[key];
     if (key === "hasWaitlist" && typeof patch[key] === "boolean") cleaned.hasWaitlist = patch[key];
     if (key === "actions") cleaned.actions = sanitizeActions(patch[key]);
@@ -627,6 +774,10 @@ function sanitizeSwatch(swatch) {
 
 function firstSectionId(project, kind) {
   return Array.isArray(project.sections) ? project.sections.find((section) => section.kind === kind)?.id : undefined;
+}
+
+function firstAnySectionId(project) {
+  return Array.isArray(project.sections) ? project.sections[0]?.id : undefined;
 }
 
 function looksLikeAtelierSite(text) {
@@ -820,7 +971,9 @@ function cleanId(value) {
 
 function cleanHref(value) {
   if (typeof value !== "string" || value.length > 240) return undefined;
-  if (value.startsWith("#") || value.startsWith("/") || /^https?:\/\//i.test(value)) return value;
+  if (value.startsWith("#") || value.startsWith("/") || /^https?:\/\//i.test(value) || /^blob:/i.test(value)) {
+    return value;
+  }
   return undefined;
 }
 

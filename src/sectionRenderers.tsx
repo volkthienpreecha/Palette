@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, MessageSquarePlus, Trash2 } from "lucide-react";
 
 export type PaletteSectionKind =
   | "nav"
@@ -78,6 +78,9 @@ export type PaletteSectionModel = {
   subtitle?: string;
   eyebrow?: string;
   variant?: PaletteSectionVariant;
+  titleSizeBoost?: number;
+  imageUrl?: string;
+  imageAlt?: string;
   hasWaitlist?: boolean;
   links?: PaletteNavLink[];
   actions?: PaletteAction[];
@@ -95,6 +98,7 @@ export type PaletteSectionHelpers = {
   onSelect?: (id: string) => void;
   onMove?: (id: string, direction: -1 | 1) => void;
   onRemove?: (id: string) => void;
+  onNote?: (section: PaletteSectionModel) => void;
   onAction?: (section: PaletteSectionModel, action: PaletteAction) => void;
   onSubmitForm?: (section: PaletteSectionModel, values: Record<string, FormDataEntryValue>) => void;
 };
@@ -117,6 +121,7 @@ export function PaletteSectionView({
       className={`generated-section section-${section.kind} variant-${section.variant ?? "atelier"} ${
         selected ? "is-selected" : ""
       }`}
+      style={section.titleSizeBoost ? ({ "--section-title-boost": `${section.titleSizeBoost}px` } as CSSProperties) : undefined}
       onClick={(event) => {
         event.stopPropagation();
         helpers.onSelect?.(section.id);
@@ -154,6 +159,14 @@ export function PaletteBrushToolbar({
         onClick={() => helpers.onMove?.(section.id, 1)}
       >
         <ArrowDown size={14} />
+      </button>
+      <button
+        type="button"
+        title="Note"
+        aria-label={`Add note to ${section.kind} section`}
+        onClick={() => helpers.onNote?.(section)}
+      >
+        <MessageSquarePlus size={14} />
       </button>
       <button
         type="button"
@@ -242,6 +255,7 @@ export function PaletteHeroSection({
 }) {
   const primary = section.actions?.[0] ?? { label: "Join waitlist" };
   const secondary = section.actions?.[1]?.label ?? "First tasting opens at 7:30 AM";
+  const hasReferenceImage = Boolean(section.imageUrl);
 
   return (
     <div className="demo-hero">
@@ -259,13 +273,19 @@ export function PaletteHeroSection({
         ) : null}
         {section.hasWaitlist ? <PaletteInlineWaitlist section={section} helpers={helpers} /> : null}
       </div>
-      <div className="coffee-study" aria-hidden="true">
-        <div className="robot-arm" />
-        <div className="cup">
-          <span />
-        </div>
-        <div className="steam steam-one" />
-        <div className="steam steam-two" />
+      <div className={`coffee-study ${hasReferenceImage ? "has-reference-image" : ""}`} aria-hidden={!hasReferenceImage}>
+        {section.imageUrl ? (
+          <img className="coffee-reference-image" src={section.imageUrl} alt={section.imageAlt ?? ""} />
+        ) : (
+          <>
+            <div className="robot-arm" />
+            <div className="cup">
+              <span />
+            </div>
+            <div className="steam steam-one" />
+            <div className="steam steam-two" />
+          </>
+        )}
       </div>
     </div>
   );

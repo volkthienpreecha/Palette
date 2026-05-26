@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  Brush,
   Code2,
   Download,
   FolderDown,
@@ -22,7 +21,6 @@ import {
   applyOperation,
   createBlankProject,
   createProjectFromTemplate,
-  paintingStageLabels,
   redoProject,
   sectionStatus,
   undoProject,
@@ -35,7 +33,7 @@ import { requestIntent } from "./intentBridge";
 import { requestProjectSave } from "./projectStoreBridge";
 import { requestVoiceTranscription } from "./voiceBridge";
 
-type Phase = "idle" | "interview" | "painting" | "paused" | "done";
+type Phase = "idle" | "interview" | "painting" | "paused" | "repainting" | "done";
 type ProjectTemplate = "robot-coffee" | "portfolio" | "studio-saas";
 type ProjectMood = "atelier" | "premium";
 
@@ -46,8 +44,29 @@ const phaseCopy: Record<Phase, string> = {
   interview: "One studio question before the first wash.",
   painting: "Palette is painting in layers. Press Esc to interrupt.",
   paused: "Brush lifted. Steer the surface before it sets.",
+  repainting: "Palette is repainting the selected surface.",
   done: "Canvas set. Select any section to keep steering.",
 };
+
+const paintPrepSteps = [
+  { label: "Prime canvas", status: "Priming the glass surface." },
+  { label: "Mix swatches", status: "Mixing the dark paint system." },
+  { label: "Paint navigation", status: "Laying in the navigation frame." },
+  { label: "Lay first wash", status: "Washing in the first viewport." },
+  { label: "Paint details", status: "Detailing the section controls." },
+];
+
+const paintPrepDelayMs = 1050;
+const paintSectionDelayMs = 1450;
+const repaintDelayMs = 1250;
+
+const demoEditCommands = [
+  "Make the title bigger by 4pt.",
+  "Change the picture to the pasted reference.",
+  "Make the hero copy shorter and sharper.",
+  "Make this section feel more premium.",
+  "Add a note: Emphasize the morning rush use case.",
+];
 
 function App() {
   const [project, setProject] = useState<PaletteProject>(() => createBlankProject());
@@ -64,6 +83,7 @@ function App() {
   const [savingProject, setSavingProject] = useState(false);
   const [codexEvents, setCodexEvents] = useState<CodexApplyEvent[]>([]);
   const [status, setStatus] = useState(phaseCopy.idle);
+  const [demoEditStep, setDemoEditStep] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectRef = useRef<PaletteProject | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -75,9 +95,23 @@ function App() {
 
   const selectedSection = project.sections.find((section) => section.id === selectedId);
 
-  const openCommandCapsule = useCallback(() => {
+  const openCommandCapsule = useCallback((nextDraft?: string) => {
+    const hasCanvas = project.sections.length > 0;
+    if (phase === "painting") {
+      setPhase("paused");
+      setStatus("Brush lifted mid-stroke. Steer the canvas before it keeps painting.");
+    }
+
+    if (nextDraft !== undefined) {
+      setDraft(nextDraft);
+    } else if (phase === "idle" && !hasCanvas) {
+      setDraft(initialStroke);
+    } else {
+      setDraft("");
+    }
+
     setCapsuleOpen(true);
-  }, []);
+  }, [phase, project.sections.length]);
 
   const replaceProjectForPainting = useCallback(
     (template: ProjectTemplate, mood: ProjectMood) => {
@@ -105,6 +139,7 @@ function App() {
     setProject((current) => {
       const result = applyOperation(current, operation);
       exportText = result.project.exportText;
+      projectRef.current = result.project;
       setStatus(result.status);
       return result.project;
     });
@@ -133,63 +168,79 @@ function App() {
   const applyDirection = useCallback(
     async (raw: string) => {
       if (applying) return;
+      const command = raw.trim();
+      if (!command) {
+        setStatus("No brushstroke given.");
+        return;
+      }
+      const resolvedCommand = resolveDemoEditCommand(command, demoEditStep);
+
       setApplying(true);
       setStatus("Mixing the brushstroke into safe canvas operations.");
 
-      const contextProject = projectRef.current!;
-      const result = await requestIntent(raw, { project: contextProject, selectedId });
-      const startProject = result.operations.find(
-        (operation): operation is Extract<PaletteOperation, { type: "start_project" }> =>
-          operation.type === "start_project",
-      );
-
-      if (startProject) {
-        setPendingTemplate(startProject.template);
-        setCapsuleOpen(false);
-        setPhase("interview");
-        setStatus(result.status);
-        setApplying(false);
-        return;
-      }
-
-      if (result.operations.length > 0) {
-        const premiumTheme = result.operations.some(
-          (operation) => operation.type === "set_theme" && operation.theme === "premium",
-        );
-        const atelierTheme = result.operations.some(
-          (operation) => operation.type === "set_theme" && operation.theme === "atelier",
+      try {
+        const contextProject = projectRef.current!;
+        const resumePainting = phase === "paused" && activeStep < paintQueue.length + paintPrepSteps.length;
+        const result = await requestIntent(resolvedCommand, { project: contextProject, selectedId });
+        const startProject = result.operations.find(
+          (operation): operation is Extract<PaletteOperation, { type: "start_project" }> =>
+            operation.type === "start_project",
         );
 
-        if (premiumTheme || atelierTheme) {
-          setPaintQueue((current) =>
-            current.map((section) => ({
-              ...section,
-              variant:
-                section.variant === "playful"
-                  ? "playful"
-                  : premiumTheme
-                    ? "premium"
-                    : "atelier",
-            })),
-          );
+        if (startProject) {
+          setPendingTemplate(startProject.template);
+          setDemoEditStep(0);
+          setCapsuleOpen(false);
+          setPhase("interview");
+          setStatus(result.status);
+          return;
         }
 
-        applyOperations(result.operations);
-        if (phase === "paused") setPhase("painting");
-      } else {
-        setStatus(result.status);
+        if (result.operations.length > 0) {
+          const premiumTheme = result.operations.some(
+            (operation) => operation.type === "set_theme" && operation.theme === "premium",
+          );
+          const atelierTheme = result.operations.some(
+            (operation) => operation.type === "set_theme" && operation.theme === "atelier",
+          );
+
+          if (premiumTheme || atelierTheme) {
+            setPaintQueue((current) =>
+              current.map((section) => ({
+                ...section,
+                variant:
+                  section.variant === "playful"
+                    ? "playful"
+                    : premiumTheme
+                      ? "premium"
+                      : "atelier",
+              })),
+            );
+          }
+
+          setCapsuleOpen(false);
+          setListening(false);
+          setPhase("repainting");
+          setStatus("Repainting the selected surface from your stroke.");
+          await wait(repaintDelayMs);
+          applyOperations(result.operations);
+          setDemoEditStep((current) => nextDemoEditStep(resolvedCommand, current));
+          setPhase(resumePainting ? "painting" : "done");
+        } else {
+          setStatus(result.status);
+        }
+      } finally {
+        setApplying(false);
       }
-      setCapsuleOpen(false);
-      setApplying(false);
     },
-    [applying, applyOperations, phase, selectedId],
+    [activeStep, applying, applyOperations, demoEditStep, paintQueue.length, phase, selectedId],
   );
 
   const interruptPainting = useCallback(() => {
     if (phase !== "painting") return;
     setPhase("paused");
     setCapsuleOpen(true);
-    setDraft("Make it darker and more premium.");
+    setDraft("");
     setStatus("Brush lifted mid-stroke. Tell Palette what to change.");
   }, [phase]);
 
@@ -268,21 +319,6 @@ function App() {
     setStatus(result.folder ? `${result.status} ${result.folder}` : result.status);
   }, [project]);
 
-  const fallbackVoiceStroke = useCallback(
-    (fallbackStatus?: string) => {
-      const next =
-        phase === "paused"
-          ? "Make it darker and more premium."
-          : selectedId
-            ? "Add a waitlist form here."
-            : initialStroke;
-      setDraft(next);
-      setListening(false);
-      setStatus(fallbackStatus || "Voice bridge unavailable. Filled a demo brushstroke.");
-    },
-    [phase, selectedId],
-  );
-
   const finishVoiceRecording = useCallback(
     async (audio: Blob) => {
       setListening(false);
@@ -292,12 +328,14 @@ function App() {
       if (result.text) {
         setDraft(result.text);
         setStatus(result.status);
+        void applyDirection(result.text);
         return;
       }
 
-      fallbackVoiceStroke(result.status);
+      setDraft("");
+      setStatus(result.status || "I did not catch a brushstroke. Speak the edit again.");
     },
-    [fallbackVoiceStroke],
+    [applyDirection],
   );
 
   const toggleVoiceInput = useCallback(async () => {
@@ -307,11 +345,15 @@ function App() {
       return;
     }
 
+    setCapsuleOpen(true);
+    setDraft("");
+
     if (
       !navigator.mediaDevices?.getUserMedia ||
       typeof MediaRecorder === "undefined"
     ) {
-      fallbackVoiceStroke("This browser cannot record voice. Filled a demo brushstroke.");
+      setListening(false);
+      setStatus("This browser cannot record voice. Enable microphone support or type the stroke.");
       return;
     }
 
@@ -334,13 +376,13 @@ function App() {
       };
 
       recorder.start();
-      setCapsuleOpen(true);
       setListening(true);
       setStatus("Listening for a spoken brushstroke.");
     } catch {
-      fallbackVoiceStroke("Microphone access was not available. Filled a demo brushstroke.");
+      setListening(false);
+      setStatus("Microphone access was not available. Enable it and speak the edit again.");
     }
-  }, [fallbackVoiceStroke, finishVoiceRecording]);
+  }, [finishVoiceRecording]);
 
   const removeSection = useCallback(
     (id: string) => {
@@ -351,6 +393,20 @@ function App() {
     [applyOneOperation, phase],
   );
 
+  const noteSection = useCallback(
+    (section: PaletteSectionModel) => {
+      setSelectedId(section.id);
+      if (phase === "painting") {
+        setPhase("paused");
+        setStatus(`Brush lifted on the ${section.kind}. Speak or type the note.`);
+      } else {
+        setStatus(`Steering the ${section.kind}. Speak or type the note.`);
+      }
+      openCommandCapsule("");
+    },
+    [openCommandCapsule, phase],
+  );
+
   const addFiles = useCallback(
     (files: FileList | File[]) => {
       const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
@@ -358,17 +414,32 @@ function App() {
 
       for (const file of imageFiles) {
         const url = URL.createObjectURL(file);
+        const id = `${file.name || "clipboard-reference"}-${Date.now()}`;
+        const title = file.name?.replace(/\.[^.]+$/, "") || "Clipboard reference";
+        const swatch: PaletteSwatch = {
+          id,
+          title,
+          note: "Pinned visual reference.",
+          url,
+          colors: [],
+        };
+        applyOneOperation({ type: "add_swatch", swatch });
+
         extractColors(url).then((colors) => {
-          const swatch: PaletteSwatch = {
-            id: `${file.name}-${Date.now()}`,
-            title: file.name.replace(/\.[^.]+$/, "") || "Reference",
-            note: colors.length
-              ? `Mixed ${colors.slice(0, 2).join(" and ")} from this reference.`
-              : "Pinned visual reference.",
-            url,
-            colors,
-          };
-          applyOneOperation({ type: "add_swatch", swatch });
+          if (colors.length === 0) return;
+          const note = `Mixed ${colors.slice(0, 2).join(" and ")} from this reference.`;
+          setProject((current) => {
+            const next = {
+              ...current,
+              swatchAccent: current.swatches[0]?.id === id ? colors[0] : current.swatchAccent,
+              swatchColors: current.swatches[0]?.id === id ? colors : current.swatchColors,
+              swatches: current.swatches.map((item) =>
+                item.id === id ? { ...item, note, colors } : item,
+              ),
+            };
+            projectRef.current = next;
+            return next;
+          });
         });
       }
     },
@@ -378,19 +449,18 @@ function App() {
   useEffect(() => {
     if (phase !== "painting") return;
 
-    if (activeStep >= paintQueue.length + 2) {
+    if (activeStep >= paintQueue.length + paintPrepSteps.length) {
       setPhase("done");
       setStatus("Canvas set. Keep selecting sections to steer.");
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      if (activeStep === 0) {
-        setStatus("Priming the canvas with a warm studio surface.");
-      } else if (activeStep === 1) {
-        setStatus("Mixing swatches into a controlled component model.");
+      const prepStep = paintPrepSteps[activeStep];
+      if (prepStep) {
+        setStatus(prepStep.status);
       } else {
-        const sectionIndex = activeStep - 2;
+        const sectionIndex = activeStep - paintPrepSteps.length;
         const section = paintQueue[sectionIndex];
         if (section) {
           setStatus(sectionStatus(section, sectionIndex));
@@ -398,7 +468,7 @@ function App() {
         }
       }
       setActiveStep((current) => current + 1);
-    }, activeStep < 2 ? 520 : 920);
+    }, activeStep < paintPrepSteps.length ? paintPrepDelayMs : paintSectionDelayMs);
 
     return () => window.clearTimeout(timeout);
   }, [activeStep, applyOneOperation, paintQueue, phase]);
@@ -408,7 +478,7 @@ function App() {
       const key = event.key.toLowerCase();
       if ((event.metaKey || event.ctrlKey) && event.shiftKey && key === "k") {
         event.preventDefault();
-        openCommandCapsule();
+        openCommandCapsule("");
         void toggleVoiceInput();
         return;
       }
@@ -483,7 +553,7 @@ function App() {
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       if (!event.clipboardData) return;
-      const files = Array.from(event.clipboardData.files);
+      const files = imageFilesFromClipboard(event.clipboardData);
       if (files.length > 0) addFiles(files);
     };
     window.addEventListener("paste", onPaste);
@@ -499,15 +569,15 @@ function App() {
       <div className="atelier-wash" aria-hidden="true" />
       <header className="studio-header">
         <div>
-          <p className="studio-mark">Palette</p>
+          <p className="studio-mark">Introducing Codex Palette</p>
           <h1>Paint software into code.</h1>
         </div>
         <div className="header-actions">
-          <button className="glass-button muted" type="button" onClick={openCommandCapsule}>
+          <button className="glass-button muted" type="button" onClick={() => openCommandCapsule("")}>
             <Mic size={16} />
             <span>Command</span>
           </button>
-          <button className="glass-button" type="button" onClick={openCommandCapsule}>
+          <button className="glass-button" type="button" onClick={() => openCommandCapsule(initialStroke)}>
             <Play size={16} />
             <span>Start stroke</span>
           </button>
@@ -530,11 +600,13 @@ function App() {
         />
 
         <section className="canvas-zone" aria-label="Palette canvas">
-          <CorgiGuide phase={phase} status={status} />
-          <StatusRail activeStep={activeStep} totalSections={paintQueue.length} phase={phase} />
+          <p className="sr-status" aria-live="polite">{status}</p>
+          <StatusRail activeStep={activeStep} phase={phase} />
 
           <div
-            className={`canvas-board ${phase === "painting" ? "is-painting" : ""}`}
+            className={`canvas-board ${phase === "painting" || phase === "repainting" ? "is-painting" : ""} ${
+              phase === "repainting" ? "is-repainting" : ""
+            }`}
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
@@ -550,14 +622,11 @@ function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                 >
-                  <div className="blank-ring">
-                    <Brush size={30} />
-                  </div>
                   <h2>A clean canvas.</h2>
                   <p>
                     Press Ctrl K, place the first brushstroke, then interrupt while the canvas paints.
                   </p>
-                  <button className="primary-stroke" type="button" onClick={openCommandCapsule}>
+                  <button className="primary-stroke" type="button" onClick={() => openCommandCapsule(initialStroke)}>
                     Begin with a brushstroke
                   </button>
                 </motion.div>
@@ -594,6 +663,7 @@ function App() {
                 onSelect={setSelectedId}
                 onMove={moveSelected}
                 onRemove={removeSection}
+                onNote={noteSection}
                 onSetPaint={setPaint}
               />
             ) : null}
@@ -608,12 +678,13 @@ function App() {
         listening={listening}
         applying={applying}
         selectedSection={selectedSection}
-        onOpen={openCommandCapsule}
+        onOpen={() => openCommandCapsule()}
         onDraft={setDraft}
         onClose={() => setCapsuleOpen(false)}
         onSubmit={(value) => applyDirection(value ?? draft)}
         onInterrupt={interruptPainting}
         onListen={toggleVoiceInput}
+        onFiles={addFiles}
       />
 
       <input
@@ -761,46 +832,20 @@ function BrushLog({ project }: { project: PaletteProject }) {
   );
 }
 
-function CorgiGuide({ phase, status }: { phase: Phase; status: string }) {
-  return (
-    <aside className={`corgi-guide corgi-${phase}`} aria-live="polite">
-      <div className="corgi-sprite" aria-hidden="true" />
-      <div>
-        <span>Studio guide</span>
-        <AnimatePresence mode="popLayout">
-          <motion.p
-            key={status}
-            initial={{ opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -5 }}
-            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-          >
-            {status}
-          </motion.p>
-        </AnimatePresence>
-      </div>
-    </aside>
-  );
-}
-
 function StatusRail({
   activeStep,
-  totalSections,
   phase,
 }: {
   activeStep: number;
-  totalSections: number;
   phase: Phase;
 }) {
-  const visibleLabels =
-    totalSections > 0
-      ? paintingStageLabels
-      : ["Prime canvas", "Mix swatches", "Paint navigation", "Lay first wash", "Paint details"];
+  const visibleLabels = paintPrepSteps.map((step) => step.label);
+  const railStep = phase === "done" ? visibleLabels.length : Math.min(activeStep, visibleLabels.length - 1);
 
   return (
     <ol className="status-rail" aria-label="Painting progress">
       {visibleLabels.map((label, index) => {
-        const state = phase === "done" || index < activeStep ? "done" : index === activeStep ? "active" : "";
+        const state = phase === "done" || index < railStep ? "done" : index === railStep ? "active" : "";
         return (
           <motion.li
             className={state}
@@ -825,6 +870,7 @@ function GeneratedPage({
   onSelect,
   onMove,
   onRemove,
+  onNote,
   onSetPaint,
 }: {
   sections: PaletteSectionModel[];
@@ -833,6 +879,7 @@ function GeneratedPage({
   onSelect: (id: string) => void;
   onMove: (id: string, direction: -1 | 1) => void;
   onRemove: (id: string) => void;
+  onNote: (section: PaletteSectionModel) => void;
   onSetPaint: () => void;
 }) {
   return (
@@ -860,6 +907,7 @@ function GeneratedPage({
                 onSelect,
                 onMove,
                 onRemove,
+                onNote,
                 onAction: (_section, action) => {
                   if (action.label.toLowerCase().includes("set")) onSetPaint();
                 },
@@ -885,6 +933,7 @@ function CommandCapsule({
   onSubmit,
   onInterrupt,
   onListen,
+  onFiles,
 }: {
   phase: Phase;
   open: boolean;
@@ -898,6 +947,7 @@ function CommandCapsule({
   onSubmit: (value?: string) => void;
   onInterrupt: () => void;
   onListen: () => void | Promise<void>;
+  onFiles: (files: FileList | File[]) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -912,7 +962,7 @@ function CommandCapsule({
       {open ? (
         <motion.div
           key="expanded"
-          className="command-expanded"
+          className={`command-expanded ${listening ? "is-listening" : ""}`}
           initial={{ opacity: 0, y: 20, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 18, scale: 0.98 }}
@@ -930,6 +980,12 @@ function CommandCapsule({
             autoFocus
             value={draft}
             onChange={(event) => onDraft(event.target.value)}
+            onPaste={(event) => {
+              const files = imageFilesFromClipboard(event.clipboardData);
+              if (files.length === 0) return;
+              event.preventDefault();
+              onFiles(files);
+            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey && !applying) {
                 event.preventDefault();
@@ -939,6 +995,14 @@ function CommandCapsule({
             aria-label="Brushstroke instruction"
             placeholder="Say what should change"
           />
+          {listening ? (
+            <div className="voice-meter" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
+          ) : null}
           <div className="command-actions">
             <button
               className={listening ? "is-listening" : ""}
@@ -979,7 +1043,6 @@ function CommandCapsule({
         >
           <Mic size={18} />
           <span>Ctrl K steer</span>
-          <Brush size={16} />
         </motion.button>
       )}
       </AnimatePresence>
@@ -1048,6 +1111,81 @@ function extractColors(url: string): Promise<string[]> {
 
 function rgbToHex(r: number, g: number, b: number) {
   return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function resolveDemoEditCommand(command: string, currentStep: number) {
+  const explicitStep = demoStepIndexFromCommand(command);
+  if (explicitStep !== null) return demoEditCommands[explicitStep];
+
+  const text = normalizeDemoCommand(command);
+  if (["next", "next edit", "continue", "do the next one", "run the next one"].includes(text)) {
+    return demoEditCommands[currentStep] ?? command;
+  }
+
+  return command;
+}
+
+function nextDemoEditStep(command: string, currentStep: number) {
+  const explicitStep = demoEditCommands.findIndex(
+    (demoCommand) => normalizeDemoCommand(demoCommand) === normalizeDemoCommand(command),
+  );
+  if (explicitStep >= 0) return Math.min(demoEditCommands.length, Math.max(currentStep, explicitStep + 1));
+
+  const inferredStep = inferDemoEditStep(command);
+  if (inferredStep !== null) return Math.min(demoEditCommands.length, Math.max(currentStep, inferredStep + 1));
+
+  return currentStep;
+}
+
+function demoStepIndexFromCommand(command: string) {
+  const text = normalizeDemoCommand(command);
+  const aliases = [
+    ["1", "one", "first", "step 1", "step one", "edit 1", "edit one"],
+    ["2", "two", "second", "step 2", "step two", "edit 2", "edit two"],
+    ["3", "three", "third", "step 3", "step three", "edit 3", "edit three"],
+    ["4", "four", "fourth", "step 4", "step four", "edit 4", "edit four"],
+    ["5", "five", "fifth", "step 5", "step five", "edit 5", "edit five"],
+  ];
+  const index = aliases.findIndex((group) => group.includes(text));
+  return index >= 0 ? index : null;
+}
+
+function inferDemoEditStep(command: string) {
+  const text = normalizeDemoCommand(command);
+  if (text.includes("title") && (text.includes("bigger") || text.includes("larger"))) return 0;
+  if ((text.includes("image") || text.includes("picture") || text.includes("photo")) && text.includes("change")) return 1;
+  if (text.includes("copy") && (text.includes("shorter") || text.includes("sharper"))) return 2;
+  if (text.includes("premium")) return 3;
+  if (text.includes("note")) return 4;
+  return null;
+}
+
+function normalizeDemoCommand(command: string) {
+  return command
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function imageFilesFromClipboard(data: DataTransfer) {
+  const byKey = new Map<string, File>();
+  const add = (file: File | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const key = `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+    byKey.set(key, file);
+  };
+
+  Array.from(data.files).forEach(add);
+  Array.from(data.items).forEach((item) => {
+    if (item.kind === "file") add(item.getAsFile());
+  });
+
+  return Array.from(byKey.values());
 }
 
 export default App;

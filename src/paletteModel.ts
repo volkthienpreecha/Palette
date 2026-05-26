@@ -72,20 +72,7 @@ export type OperationResult = {
   status: string;
 };
 
-const starterSwatches: PaletteSwatch[] = [
-  {
-    id: "glass",
-    title: "Liquid glass",
-    note: "Approved button material for active controls.",
-    tone: "glass",
-  },
-  {
-    id: "paper",
-    title: "Atelier paper",
-    note: "Warm canvas, graphite ink, sparse pigment.",
-    tone: "paper",
-  },
-];
+const robotCoffeeReference = "/robot-coffee-reference.png";
 
 export const paintingStageLabels = [
   "Prime canvas",
@@ -104,7 +91,7 @@ export function createBlankProject(): PaletteProject {
     name: "Untitled canvas",
     theme: "atelier",
     sections: [],
-    swatches: starterSwatches,
+    swatches: [],
     brushLog: [logEntry("Canvas primed", "A clean atelier canvas is ready.")],
     past: [],
     future: [],
@@ -317,7 +304,7 @@ export function parseIntent(command: string, context: CommandContext): IntentRes
     return { operations: [{ type: "export_project" }], status: "Downloaded palette-project.json." };
   }
 
-  const id = selectedId ?? firstSectionId(context.project, "hero");
+  const id = selectedId ?? firstSectionId(context.project, "hero") ?? firstAnySectionId(context.project);
   if (id && (text.includes("headline") || text.includes("title"))) {
     return {
       operations: [{ type: "update_section", id, patch: { title: toTitle(command.replace(/headline|title/gi, "")) } }],
@@ -578,6 +565,9 @@ type PaletteSection = {
   subtitle?: string;
   eyebrow?: string;
   variant?: string;
+  titleSizeBoost?: number;
+  imageUrl?: string;
+  imageAlt?: string;
   hasWaitlist?: boolean;
   links?: SectionAction[];
   actions?: SectionAction[];
@@ -653,11 +643,13 @@ function HeroSection({ section }: { section: PaletteSection }) {
     <div className="demo-hero" style={accentStyle()}>
       <div className="hero-copy">
         {section.eyebrow ? <span className="section-eyebrow">{section.eyebrow}</span> : null}
-        <h1>{section.title}</h1>
+        <h1 style={titleBoostStyle(section)}>{section.title}</h1>
         {section.subtitle ? <p>{section.subtitle}</p> : null}
         {section.hasWaitlist ? <InlineWaitlist section={section} /> : <div className="hero-actions">{primary ? <a href={primary.href ?? "#"}>{primary.label}</a> : null}{secondary ? <span>{secondary}</span> : null}</div>}
       </div>
-      <div className="coffee-study" aria-hidden="true" />
+      <div className={\`coffee-study \${section.imageUrl ? "has-reference-image" : ""}\`} aria-hidden={!section.imageUrl}>
+        {section.imageUrl ? <img className="coffee-reference-image" src={section.imageUrl} alt={section.imageAlt ?? ""} /> : null}
+      </div>
     </div>
   );
 }
@@ -743,11 +735,15 @@ function FooterSection({ section }: { section: PaletteSection }) {
 }
 
 function Intro({ section }: { section: PaletteSection }) {
-  return <div>{section.eyebrow ? <span className="section-eyebrow">{section.eyebrow}</span> : null}<h2>{section.title}</h2>{section.subtitle ? <p>{section.subtitle}</p> : null}</div>;
+  return <div>{section.eyebrow ? <span className="section-eyebrow">{section.eyebrow}</span> : null}<h2 style={titleBoostStyle(section)}>{section.title}</h2>{section.subtitle ? <p>{section.subtitle}</p> : null}</div>;
 }
 
 function accentStyle() {
   return swatchAccent ? { borderColor: swatchAccent } : undefined;
+}
+
+function titleBoostStyle(section: PaletteSection) {
+  return section.titleSizeBoost ? { fontSize: \`calc(100% + \${section.titleSizeBoost}px)\` } : undefined;
 }
 
 function preventSubmit(event: FormEvent<HTMLFormElement>) {
@@ -885,6 +881,10 @@ function firstSectionId(project: PaletteProject, kind: PaletteSectionKind): stri
   return project.sections.find((section) => section.kind === kind)?.id;
 }
 
+function firstAnySectionId(project: PaletteProject): string | undefined {
+  return project.sections[0]?.id;
+}
+
 function looksLikeAtelierSite(text: string) {
   const siteIntent =
     text.includes("build") ||
@@ -910,14 +910,53 @@ function preciseSectionOperationsFromText(
   selected?: PaletteSectionModel,
 ): PaletteOperation[] {
   const operations: PaletteOperation[] = [];
-  const targetId = selectedId ?? firstSectionId(project, "hero");
+  const targetId = selectedId ?? firstSectionId(project, "hero") ?? firstAnySectionId(project);
   const noteText = extractNoteText(command);
+  const imageTarget = imageTargetSection(project, selectedId);
 
   if (noteText) {
     operations.push({
       type: "add_section",
       section: noteSection(noteText, selected),
       afterId: selectedId ?? undefined,
+    });
+  }
+
+  if (targetId && wantsLargerTitle(text)) {
+    operations.push({
+      type: "update_section",
+      id: targetId,
+      patch: { titleSizeBoost: nextTitleBoost(selected) },
+    });
+  }
+
+  if (imageTarget && wantsBetterImage(text)) {
+    operations.push({
+      type: "update_section",
+      id: imageTarget.id,
+      patch: imagePatchForSection(imageTarget, project),
+    });
+  }
+
+  const heroId = firstSectionId(project, "hero") ?? targetId;
+  if (heroId && wantsShorterSharperCopy(text)) {
+    operations.push({
+      type: "update_section",
+      id: heroId,
+      patch: {
+        subtitle: "Fast robot coffee, quiet studio service, ready before the morning rush.",
+      },
+    });
+  }
+
+  if (targetId && wantsPremiumSection(text)) {
+    operations.push({
+      type: "update_section",
+      id: targetId,
+      patch: {
+        variant: "glass",
+        eyebrow: "Premium service pass",
+      },
     });
   }
 
@@ -981,16 +1020,114 @@ function variantFromText(text: string): PaletteSectionVariant | undefined {
 }
 
 function statusForPreciseOperations(operations: PaletteOperation[]) {
+  if (
+    operations.some(
+      (operation) =>
+        operation.type === "update_section" &&
+        ("titleSizeBoost" in operation.patch || "imageUrl" in operation.patch || "gallery" in operation.patch),
+    )
+  ) {
+    return "Repainted the selected section from the note.";
+  }
   if (operations.some((operation) => operation.type === "add_section" && operation.section.kind === "note")) {
     return "Pinned a note beside the selected section.";
   }
   if (operations.some((operation) => operation.type === "update_section")) {
+    if (
+      operations.some(
+        (operation) =>
+          operation.type === "update_section" &&
+          ("variant" in operation.patch || "eyebrow" in operation.patch),
+      )
+    ) {
+      return "Repainted the selected section finish.";
+    }
     return "Repainted the selected wording.";
   }
   if (operations.some((operation) => operation.type === "set_variant")) {
     return "Changed only the selected section.";
   }
   return "Painted the selected canvas change.";
+}
+
+function wantsLargerTitle(text: string): boolean {
+  return (
+    (text.includes("bigger") || text.includes("larger") || text.includes("increase")) &&
+    (text.includes("title") || text.includes("headline") || text.includes("heading") || text.includes("text"))
+  );
+}
+
+function nextTitleBoost(selected?: PaletteSectionModel): number {
+  return Math.min(18, (selected?.titleSizeBoost ?? 0) + 6);
+}
+
+function wantsBetterImage(text: string): boolean {
+  return (
+    (text.includes("picture") || text.includes("image") || text.includes("photo") || text.includes("visual")) &&
+    (text.includes("better") || text.includes("change") || text.includes("replace") || text.includes("swap"))
+  );
+}
+
+function wantsShorterSharperCopy(text: string): boolean {
+  return (
+    (text.includes("copy") || text.includes("subtitle") || text.includes("description") || text.includes("body")) &&
+    (text.includes("shorter") || text.includes("sharper") || text.includes("tighter"))
+  );
+}
+
+function wantsPremiumSection(text: string): boolean {
+  return text.includes("premium") && (text.includes("section") || text.includes("feel") || text.includes("this"));
+}
+
+function imageTargetSection(project: PaletteProject, selectedId: string | null): PaletteSectionModel | undefined {
+  const selected = selectedId ? project.sections.find((section) => section.id === selectedId) : undefined;
+  if (selected?.kind === "hero" || selected?.kind === "gallery") return selected;
+  return (
+    project.sections.find((section) => section.kind === "hero") ??
+    project.sections.find((section) => section.kind === "gallery")
+  );
+}
+
+function imagePatchForSection(section: PaletteSectionModel, project: PaletteProject): Partial<PaletteSectionModel> {
+  const reference = latestImageReference(project);
+  if (section.kind === "gallery") {
+    const gallery = section.gallery?.length
+      ? section.gallery
+      : [
+          { title: "Robot coffee study", copy: "A softer machine reference for the canvas." },
+          { title: "Counter rhythm", copy: "Warm service with a mechanical assistant." },
+          { title: "Morning pour", copy: "A clearer visual note for the section." },
+        ];
+
+    return {
+      gallery: gallery.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              title: reference.title,
+              copy: "A cleaner robot-and-espresso reference for this canvas.",
+              imageUrl: reference.url,
+              imageAlt: reference.alt,
+            }
+          : item,
+      ),
+    };
+  }
+
+  return {
+    imageUrl: reference.url,
+    imageAlt: reference.alt,
+    eyebrow: section.eyebrow ?? "Reference upgraded",
+  };
+}
+
+function latestImageReference(project: PaletteProject) {
+  const swatch = project.swatches.find((item) => item.url);
+  return {
+    url: swatch?.url ?? robotCoffeeReference,
+    alt: swatch?.title || "Robot assistant beside an espresso machine",
+    title: swatch?.title || "Robot coffee study",
+  };
 }
 
 function sectionOperationsFromText(

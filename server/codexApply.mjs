@@ -125,6 +125,12 @@ function sanitizeSection(section) {
     subtitle: cleanText(section.subtitle, 220),
     eyebrow: cleanText(section.eyebrow, 80),
     variant: cleanText(section.variant, 40),
+    titleSizeBoost:
+      typeof section.titleSizeBoost === "number" && Number.isFinite(section.titleSizeBoost)
+        ? Math.max(0, Math.min(24, section.titleSizeBoost))
+        : undefined,
+    imageUrl: cleanHref(section.imageUrl),
+    imageAlt: cleanText(section.imageAlt, 80),
     hasWaitlist: typeof section.hasWaitlist === "boolean" ? section.hasWaitlist : undefined,
     links: sanitizeList(section.links, 8),
     actions: sanitizeList(section.actions, 6),
@@ -475,6 +481,12 @@ function cleanId(value) {
 
 function cleanColor(value) {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : undefined;
+}
+
+function cleanHref(value) {
+  if (typeof value !== "string" || value.length > 240) return undefined;
+  if (value.startsWith("#") || value.startsWith("/") || /^https?:\/\//i.test(value)) return value;
+  return undefined;
 }
 
 function dropUndefined(value) {
