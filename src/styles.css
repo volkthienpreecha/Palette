@@ -1567,6 +1567,13 @@ h1, h2, h3 {
 }
 
 /* Glass variant — intentional, purposeful frosted surface */
+.variant-glass {
+  border-color: color-mix(in oklch, var(--gold) 48%, var(--line));
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, oklch(1 0 0) 10%, transparent),
+    0 24px 70px color-mix(in oklch, oklch(0.02 0.006 72) 34%, transparent);
+}
+
 .variant-glass .demo-hero,
 .variant-glass .demo-features,
 .variant-glass .demo-pricing,
@@ -1577,6 +1584,29 @@ h1, h2, h3 {
     color-mix(in oklch, var(--paper) 55%, transparent);
   backdrop-filter: blur(20px) saturate(1.15);
   border: 1px solid color-mix(in oklch, var(--cobalt) 28%, var(--line));
+}
+
+.theme-premium .variant-glass .demo-hero,
+.theme-premium .variant-glass .demo-features,
+.theme-premium .variant-glass .demo-pricing,
+.theme-premium .variant-glass .demo-cta,
+.theme-premium .variant-glass .demo-note {
+  background:
+    linear-gradient(145deg, color-mix(in oklch, oklch(1 0 0) 10%, transparent), transparent 42%),
+    linear-gradient(180deg, oklch(0.31 0.019 76), oklch(0.205 0.015 72));
+  border: 1px solid color-mix(in oklch, var(--gold) 42%, var(--line));
+  box-shadow: inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 14%, transparent);
+}
+
+.theme-premium .variant-glass .section-eyebrow,
+.theme-premium .variant-glass .feature-list article::before {
+  color: var(--gold);
+  opacity: 1;
+}
+
+.theme-premium .variant-glass .feature-list article,
+.theme-premium .variant-glass .feature-list article:last-child {
+  border-color: color-mix(in oklch, var(--gold) 20%, var(--line));
 }
 
 /* Editorial variant — dark ink panel */

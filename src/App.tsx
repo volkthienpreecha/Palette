@@ -36,8 +36,21 @@ import { requestVoiceTranscription } from "./voiceBridge";
 type Phase = "idle" | "interview" | "painting" | "paused" | "repainting" | "done";
 type ProjectTemplate = "robot-coffee" | "portfolio" | "studio-saas";
 type ProjectMood = "atelier" | "premium";
-
-const initialStroke = "Build a landing page for a robot coffee shop.";
+type SpeechRecognitionResultLike = ArrayLike<{ readonly isFinal: boolean; 0?: { transcript: string } }>;
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { results: SpeechRecognitionResultLike }) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: new () => SpeechRecognitionLike;
+  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+};
 
 const phaseCopy: Record<Phase, string> = {
   idle: "Canvas is clean. Press Ctrl K and place the first brushstroke.",
@@ -76,7 +89,7 @@ function App() {
   const [pendingTemplate, setPendingTemplate] = useState<ProjectTemplate>("robot-coffee");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [capsuleOpen, setCapsuleOpen] = useState(false);
-  const [draft, setDraft] = useState(initialStroke);
+  const [draft, setDraft] = useState("");
   const [listening, setListening] = useState(false);
   const [applying, setApplying] = useState(false);
   const [repoApplying, setRepoApplying] = useState(false);
@@ -87,6 +100,10 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectRef = useRef<PaletteProject | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const liveTranscriptRef = useRef("");
+  const liveTranscriptionTimerRef = useRef<number | null>(null);
+  const liveTranscriptionInFlightRef = useRef(false);
   const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
@@ -95,8 +112,89 @@ function App() {
 
   const selectedSection = project.sections.find((section) => section.id === selectedId);
 
+  const stopLiveSpeechRecognition = useCallback(() => {
+    const recognition = speechRecognitionRef.current;
+    if (!recognition) return;
+    speechRecognitionRef.current = null;
+    recognition.onresult = null;
+    recognition.onend = null;
+    recognition.onerror = null;
+    try {
+      recognition.stop();
+    } catch {
+      // The browser may already have ended recognition when recording stops.
+    }
+  }, []);
+
+  const startLiveSpeechRecognition = useCallback(() => {
+    const SpeechRecognition =
+      (window as SpeechRecognitionWindow).SpeechRecognition ??
+      (window as SpeechRecognitionWindow).webkitSpeechRecognition;
+    if (!SpeechRecognition) return false;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map((result) => result[0]?.transcript ?? "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (!transcript) return;
+      liveTranscriptRef.current = transcript;
+      setDraft(transcript);
+    };
+    recognition.onerror = () => undefined;
+    recognition.onend = () => {
+      if (speechRecognitionRef.current === recognition) speechRecognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      speechRecognitionRef.current = recognition;
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const stopLiveTranscriptionPolling = useCallback(() => {
+    if (liveTranscriptionTimerRef.current !== null) {
+      window.clearInterval(liveTranscriptionTimerRef.current);
+      liveTranscriptionTimerRef.current = null;
+    }
+    liveTranscriptionInFlightRef.current = false;
+  }, []);
+
+  const transcribeLiveAudio = useCallback(async (recorder: MediaRecorder) => {
+    if (
+      liveTranscriptionInFlightRef.current ||
+      recorder.state === "inactive" ||
+      audioChunksRef.current.length === 0
+    ) {
+      return;
+    }
+
+    liveTranscriptionInFlightRef.current = true;
+    const audio = new Blob(audioChunksRef.current, {
+      type: recorder.mimeType || "audio/webm",
+    });
+    const result = await requestVoiceTranscription(audio);
+    const text = result.text.trim();
+    const activeRecorder = mediaRecorderRef.current;
+
+    if (text && activeRecorder === recorder && activeRecorder.state !== "inactive") {
+      liveTranscriptRef.current = text;
+      setDraft(text);
+    }
+
+    liveTranscriptionInFlightRef.current = false;
+  }, []);
+
   const openCommandCapsule = useCallback((nextDraft?: string) => {
-    const hasCanvas = project.sections.length > 0;
     if (phase === "painting") {
       setPhase("paused");
       setStatus("Brush lifted mid-stroke. Steer the canvas before it keeps painting.");
@@ -104,14 +202,12 @@ function App() {
 
     if (nextDraft !== undefined) {
       setDraft(nextDraft);
-    } else if (phase === "idle" && !hasCanvas) {
-      setDraft(initialStroke);
     } else {
       setDraft("");
     }
 
     setCapsuleOpen(true);
-  }, [phase, project.sections.length]);
+  }, [phase]);
 
   const replaceProjectForPainting = useCallback(
     (template: ProjectTemplate, mood: ProjectMood) => {
@@ -169,17 +265,17 @@ function App() {
     async (raw: string) => {
       if (applying) return;
       const command = raw.trim();
-      if (!command) {
+      const contextProject = projectRef.current!;
+      if (!command && contextProject.sections.length === 0) {
         setStatus("No brushstroke given.");
         return;
       }
-      const resolvedCommand = resolveDemoEditCommand(command, demoEditStep);
+      const resolvedCommand = resolveDemoEditCommand(command, demoEditStep, contextProject.sections.length > 0);
 
       setApplying(true);
       setStatus("Mixing the brushstroke into safe canvas operations.");
 
       try {
-        const contextProject = projectRef.current!;
         const resumePainting = phase === "paused" && activeStep < paintQueue.length + paintPrepSteps.length;
         const result = await requestIntent(resolvedCommand, { project: contextProject, selectedId });
         const startProject = result.operations.find(
@@ -321,31 +417,36 @@ function App() {
 
   const finishVoiceRecording = useCallback(
     async (audio: Blob) => {
+      stopLiveTranscriptionPolling();
+      stopLiveSpeechRecognition();
       setListening(false);
       setStatus("Transcribing the spoken brushstroke.");
       const result = await requestVoiceTranscription(audio);
+      const spokenText = result.text.trim() || liveTranscriptRef.current.trim();
 
-      if (result.text) {
-        setDraft(result.text);
-        setStatus(result.status);
-        void applyDirection(result.text);
+      if (spokenText) {
+        setDraft(spokenText);
+        setStatus(result.text.trim() ? result.status : "Using the live mic text.");
+        void applyDirection(spokenText);
         return;
       }
 
-      setDraft("");
       setStatus(result.status || "I did not catch a brushstroke. Speak the edit again.");
     },
-    [applyDirection],
+    [applyDirection, stopLiveSpeechRecognition, stopLiveTranscriptionPolling],
   );
 
   const toggleVoiceInput = useCallback(async () => {
     const currentRecorder = mediaRecorderRef.current;
     if (currentRecorder && currentRecorder.state !== "inactive") {
+      stopLiveTranscriptionPolling();
+      stopLiveSpeechRecognition();
       currentRecorder.stop();
       return;
     }
 
     setCapsuleOpen(true);
+    liveTranscriptRef.current = "";
     setDraft("");
 
     if (
@@ -368,6 +469,7 @@ function App() {
       };
 
       recorder.onstop = () => {
+        stopLiveTranscriptionPolling();
         stream.getTracks().forEach((track) => track.stop());
         const audio = new Blob(audioChunksRef.current, {
           type: recorder.mimeType || "audio/webm",
@@ -375,14 +477,30 @@ function App() {
         void finishVoiceRecording(audio);
       };
 
-      recorder.start();
+      recorder.start(700);
+      const hasLiveTranscript = startLiveSpeechRecognition();
+      liveTranscriptionTimerRef.current = window.setInterval(() => {
+        void transcribeLiveAudio(recorder);
+      }, 1600);
       setListening(true);
-      setStatus("Listening for a spoken brushstroke.");
+      setStatus(
+        hasLiveTranscript
+          ? "Listening. The spoken brushstroke will appear as you talk."
+          : "Listening. The spoken brushstroke will appear as it is transcribed.",
+      );
     } catch {
+      stopLiveTranscriptionPolling();
+      stopLiveSpeechRecognition();
       setListening(false);
       setStatus("Microphone access was not available. Enable it and speak the edit again.");
     }
-  }, [finishVoiceRecording]);
+  }, [
+    finishVoiceRecording,
+    startLiveSpeechRecognition,
+    stopLiveSpeechRecognition,
+    stopLiveTranscriptionPolling,
+    transcribeLiveAudio,
+  ]);
 
   const removeSection = useCallback(
     (id: string) => {
@@ -545,14 +663,17 @@ function App() {
 
   useEffect(() => {
     return () => {
+      stopLiveTranscriptionPolling();
+      stopLiveSpeechRecognition();
       const currentRecorder = mediaRecorderRef.current;
       if (currentRecorder && currentRecorder.state !== "inactive") currentRecorder.stop();
     };
-  }, []);
+  }, [stopLiveSpeechRecognition, stopLiveTranscriptionPolling]);
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
-      if (!event.clipboardData) return;
+      if (event.defaultPrevented || !event.clipboardData) return;
+      if (event.target instanceof Element && event.target.closest(".command-dock")) return;
       const files = imageFilesFromClipboard(event.clipboardData);
       if (files.length > 0) addFiles(files);
     };
@@ -577,7 +698,7 @@ function App() {
             <Mic size={16} />
             <span>Command</span>
           </button>
-          <button className="glass-button" type="button" onClick={() => openCommandCapsule(initialStroke)}>
+          <button className="glass-button" type="button" onClick={() => openCommandCapsule("")}>
             <Play size={16} />
             <span>Start stroke</span>
           </button>
@@ -601,7 +722,6 @@ function App() {
 
         <section className="canvas-zone" aria-label="Palette canvas">
           <p className="sr-status" aria-live="polite">{status}</p>
-          <StatusRail activeStep={activeStep} phase={phase} />
 
           <div
             className={`canvas-board ${phase === "painting" || phase === "repainting" ? "is-painting" : ""} ${
@@ -626,7 +746,7 @@ function App() {
                   <p>
                     Press Ctrl K, place the first brushstroke, then interrupt while the canvas paints.
                   </p>
-                  <button className="primary-stroke" type="button" onClick={() => openCommandCapsule(initialStroke)}>
+                  <button className="primary-stroke" type="button" onClick={() => openCommandCapsule("")}>
                     Begin with a brushstroke
                   </button>
                 </motion.div>
@@ -832,37 +952,6 @@ function BrushLog({ project }: { project: PaletteProject }) {
   );
 }
 
-function StatusRail({
-  activeStep,
-  phase,
-}: {
-  activeStep: number;
-  phase: Phase;
-}) {
-  const visibleLabels = paintPrepSteps.map((step) => step.label);
-  const railStep = phase === "done" ? visibleLabels.length : Math.min(activeStep, visibleLabels.length - 1);
-
-  return (
-    <ol className="status-rail" aria-label="Painting progress">
-      {visibleLabels.map((label, index) => {
-        const state = phase === "done" || index < railStep ? "done" : index === railStep ? "active" : "";
-        return (
-          <motion.li
-            className={state}
-            key={label}
-            layout
-            animate={state === "active" ? { scale: [1, 1.06, 1] } : { scale: 1 }}
-            transition={state === "active" ? { duration: 0.28, ease: [0.16, 1, 0.3, 1] } : {}}
-          >
-            <span />
-            {label}
-          </motion.li>
-        );
-      })}
-    </ol>
-  );
-}
-
 function GeneratedPage({
   sections,
   theme,
@@ -984,6 +1073,7 @@ function CommandCapsule({
               const files = imageFilesFromClipboard(event.clipboardData);
               if (files.length === 0) return;
               event.preventDefault();
+              event.stopPropagation();
               onFiles(files);
             }}
             onKeyDown={(event) => {
@@ -1117,13 +1207,20 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function resolveDemoEditCommand(command: string, currentStep: number) {
+function resolveDemoEditCommand(command: string, currentStep: number, hasCanvas: boolean) {
   const explicitStep = demoStepIndexFromCommand(command);
   if (explicitStep !== null) return demoEditCommands[explicitStep];
 
   const text = normalizeDemoCommand(command);
   if (["next", "next edit", "continue", "do the next one", "run the next one"].includes(text)) {
     return demoEditCommands[currentStep] ?? command;
+  }
+
+  const inferredStep = inferDemoEditStep(command);
+  if (inferredStep !== null) return demoEditCommands[inferredStep];
+
+  if (hasCanvas && currentStep < demoEditCommands.length) {
+    return demoEditCommands[currentStep];
   }
 
   return command;

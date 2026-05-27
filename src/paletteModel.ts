@@ -915,11 +915,20 @@ function preciseSectionOperationsFromText(
   const imageTarget = imageTargetSection(project, selectedId);
 
   if (noteText) {
-    operations.push({
-      type: "add_section",
-      section: noteSection(noteText, selected),
-      afterId: selectedId ?? undefined,
-    });
+    const morningRushTarget = morningRushTargetSection(project, selectedId);
+    if (wantsMorningRushUseCase(`${text} ${noteText}`) && morningRushTarget) {
+      operations.push({
+        type: "update_section",
+        id: morningRushTarget.id,
+        patch: morningRushPatchForSection(morningRushTarget),
+      });
+    } else {
+      operations.push({
+        type: "add_section",
+        section: noteSection(noteText, selected),
+        afterId: selectedId ?? undefined,
+      });
+    }
   }
 
   if (targetId && wantsLargerTitle(text)) {
@@ -1014,7 +1023,7 @@ function variantFromText(text: string): PaletteSectionVariant | undefined {
   if (text.includes("glass") || text.includes("glassy") || text.includes("liquid")) return "glass";
   if (text.includes("editorial") || text.includes("atelier") || text.includes("classic")) return "editorial";
   if (text.includes("darker") || text.includes("premium") || text.includes("apple") || text.includes("luxury")) {
-    return "premium";
+    return "glass";
   }
   return undefined;
 }
@@ -1023,11 +1032,27 @@ function statusForPreciseOperations(operations: PaletteOperation[]) {
   if (
     operations.some(
       (operation) =>
+        operation.type === "update_section" && operation.patch.eyebrow === "Morning rush pass",
+    )
+  ) {
+    return "Emphasized the morning rush use case.";
+  }
+
+  if (
+    operations.some(
+      (operation) =>
         operation.type === "update_section" &&
         ("titleSizeBoost" in operation.patch || "imageUrl" in operation.patch || "gallery" in operation.patch),
     )
   ) {
     return "Repainted the selected section from the note.";
+  }
+  if (
+    operations.some(
+      (operation) => operation.type === "update_section" && "features" in operation.patch,
+    )
+  ) {
+    return "Emphasized the morning rush use case.";
   }
   if (operations.some((operation) => operation.type === "add_section" && operation.section.kind === "note")) {
     return "Pinned a note beside the selected section.";
@@ -1077,6 +1102,54 @@ function wantsShorterSharperCopy(text: string): boolean {
 
 function wantsPremiumSection(text: string): boolean {
   return text.includes("premium") && (text.includes("section") || text.includes("feel") || text.includes("this"));
+}
+
+function wantsMorningRushUseCase(text: string): boolean {
+  return text.includes("morning") && (text.includes("rush") || text.includes("commuter") || text.includes("use case"));
+}
+
+function morningRushTargetSection(project: PaletteProject, selectedId: string | null) {
+  const sections = project.sections;
+  const selected = selectedId ? sections.find((section) => section.id === selectedId) : undefined;
+  return (
+    selected ??
+    sections.find((section) => section.kind === "features") ??
+    sections.find((section) => section.kind === "hero") ??
+    sections[0]
+  );
+}
+
+function morningRushPatchForSection(section: PaletteSectionModel): Partial<PaletteSectionModel> {
+  if (section.kind === "features") {
+    const features = section.features?.length
+      ? section.features
+      : [
+          { title: "Measured pour", copy: "Robotic arms tune grind, heat, and timing for each order." },
+          { title: "Human calm", copy: "The room stays quiet, tactile, and easy to understand." },
+          { title: "Morning memory", copy: "Regular orders reappear before the line reaches the counter." },
+        ];
+
+    return {
+      eyebrow: "Morning rush pass",
+      title: "Built for the morning rush",
+      subtitle: "Fast enough for commuters, quiet enough for regulars.",
+      features: features.map((item, index) =>
+        index === features.length - 1
+          ? {
+              ...item,
+              title: "Morning rush memory",
+              copy: "Regular orders, pickup timing, and repeat favorites surface before the line reaches the counter.",
+              accent: "oklch(0.71 0.09 82)",
+            }
+          : item,
+      ),
+    };
+  }
+
+  return {
+    eyebrow: "Morning rush pass",
+    subtitle: "Regular orders, pickup timing, and repeat favorites surface before the line reaches the counter.",
+  };
 }
 
 function imageTargetSection(project: PaletteProject, selectedId: string | null): PaletteSectionModel | undefined {
