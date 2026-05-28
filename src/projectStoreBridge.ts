@@ -13,7 +13,7 @@ export async function requestProjectSave(project: PaletteProject): Promise<Proje
     return {
       saved: false,
       source: "local",
-      status: "Start the Palette backend and enable folder save to persist canvases.",
+      status: "Folder save is disabled for local-only mode.",
     };
   }
 
@@ -74,11 +74,11 @@ function friendlyError(error: unknown, fallback: string) {
 }
 
 function shouldUseProjectStore() {
-  if (import.meta.env.VITE_PALETTE_PROJECT_STORE === "1") return true;
+  if (import.meta.env.VITE_PALETTE_PROJECT_STORE === "0") return false;
 
   try {
-    return window.localStorage.getItem("palette:project-store") === "1";
+    return window.localStorage.getItem("palette:project-store") !== "0";
   } catch {
-    return false;
+    return true;
   }
 }

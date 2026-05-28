@@ -1,12 +1,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { inside, normalizeProject } from "./codexApply.mjs";
+import { inside, normalizeProject } from "./handoffBundle.mjs";
+import { persistSavedProject } from "./persistentStore.mjs";
 
 export async function saveProjectFolder(payload, env = process.env) {
   const project = normalizeProject(payload?.project);
   if (project.sections.length === 0) {
     throw httpError(400, "Save needs at least one painted section.");
   }
+  const persisted = await persistSavedProject(payload, env);
 
   const workspace = path.resolve(env.PALETTE_WORKSPACE || process.cwd());
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
@@ -51,6 +53,10 @@ export async function saveProjectFolder(payload, env = process.env) {
     saved: true,
     source: "folder-store",
     status: "Saved the canvas as a Codex-readable project folder.",
+    projectId: persisted.projectId,
+    ownerToken: persisted.ownerToken,
+    reopen: `/api/projects/${persisted.projectId}`,
+    handoff: `/api/projects/${persisted.projectId}/handoff`,
     folder: folderRel,
     files,
   };

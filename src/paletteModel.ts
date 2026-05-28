@@ -489,9 +489,9 @@ function applySwatchToSection(
 ): PaletteSectionModel {
   if (section.kind === "features") {
     const fallbackFeatures = [
-      { title: "Measured pour", copy: "Robotic arms tune grind, heat, and timing for each order." },
-      { title: "Human calm", copy: "The room stays quiet, tactile, and easy to understand." },
-      { title: "Morning memory", copy: "Regular orders reappear before the line reaches the counter." },
+      { title: "Clear first stroke", copy: "The opening section explains the product without making users decode it." },
+      { title: "Human steering", copy: "Each area can be selected, revised, and polished without restarting." },
+      { title: "Agent-ready files", copy: "The generated folder is structured so a coding agent can keep building." },
     ];
     const features = section.features ?? fallbackFeatures;
     return {
@@ -505,9 +505,9 @@ function applySwatchToSection(
 
   if (section.kind === "gallery") {
     const fallbackGallery: NonNullable<PaletteSectionModel["gallery"]> = [
-      { title: "Morning bar", copy: "A calm counter with precise service." },
-      { title: "Robot pour", copy: "Mechanical movement made visible and warm." },
-      { title: "Studio table", copy: "A place for tasting notes and quiet work." },
+      { title: "First wash", copy: "A broad visual direction before details are set." },
+      { title: "Selected surface", copy: "A single section ready for direct steering." },
+      { title: "Finished pass", copy: "A polished canvas with files ready to hand off." },
     ];
     const gallery = section.gallery ?? fallbackGallery;
     return {
@@ -647,8 +647,17 @@ function HeroSection({ section }: { section: PaletteSection }) {
         {section.subtitle ? <p>{section.subtitle}</p> : null}
         {section.hasWaitlist ? <InlineWaitlist section={section} /> : <div className="hero-actions">{primary ? <a href={primary.href ?? "#"}>{primary.label}</a> : null}{secondary ? <span>{secondary}</span> : null}</div>}
       </div>
-      <div className={\`coffee-study \${section.imageUrl ? "has-reference-image" : ""}\`} aria-hidden={!section.imageUrl}>
-        {section.imageUrl ? <img className="coffee-reference-image" src={section.imageUrl} alt={section.imageAlt ?? ""} /> : null}
+      <div className={\`atelier-study \${section.imageUrl ? "has-reference-image" : ""}\`} aria-hidden={!section.imageUrl}>
+        {section.imageUrl ? (
+          <img className="atelier-reference-image" src={section.imageUrl} alt={section.imageAlt ?? ""} />
+        ) : (
+          <>
+            <div className="painted-canvas-study" />
+            <div className="palette-dish"><span /><span /><span /></div>
+            <div className="brush-stroke brush-stroke-one" />
+            <div className="brush-stroke brush-stroke-two" />
+          </>
+        )}
       </div>
     </div>
   );
@@ -657,7 +666,7 @@ function HeroSection({ section }: { section: PaletteSection }) {
 function InlineWaitlist({ section }: { section: PaletteSection }) {
   return (
     <form className="waitlist-form" onSubmit={preventSubmit}>
-      <label htmlFor={\`\${section.id}-email\`}>Reserve a tasting</label>
+      <label htmlFor={\`\${section.id}-email\`}>Join the list</label>
       <div><input id={\`\${section.id}-email\`} name="email" type="email" placeholder="name@studio.com" /><button type="submit">Set</button></div>
     </form>
   );

@@ -25,7 +25,7 @@ export async function requestCodexApply(
     return {
       applied: false,
       source: "local",
-      status: "Start the Palette backend and enable Codex apply to edit repo files.",
+      status: "Codex apply is disabled for local-only mode.",
     };
   }
 
@@ -155,11 +155,11 @@ function friendlyError(error: unknown, fallback: string) {
 }
 
 function shouldUseCodexApply() {
-  if (import.meta.env.VITE_PALETTE_CODEX_APPLY === "1") return true;
+  if (import.meta.env.VITE_PALETTE_CODEX_APPLY === "0") return false;
 
   try {
-    return window.localStorage.getItem("palette:codex-apply") === "1";
+    return window.localStorage.getItem("palette:codex-apply") !== "0";
   } catch {
-    return false;
+    return true;
   }
 }

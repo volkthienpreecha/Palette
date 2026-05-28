@@ -1,85 +1,78 @@
 {
   "id": "palette-project",
-  "name": "Rivet and Roast",
+  "name": "Palette Starter Canvas",
   "theme": "atelier",
   "sections": [
     {
-      "id": "nav-a383ac",
+      "id": "nav",
       "kind": "nav",
-      "title": "Rivet & Roast",
+      "title": "Palette Starter Canvas",
       "variant": "atelier",
       "links": [
         {
-          "label": "Menu"
+          "label": "Work"
         },
         {
-          "label": "Robots"
+          "label": "Details"
         },
         {
-          "label": "Visit"
+          "label": "Contact"
         }
       ],
       "actions": [
         {
-          "label": "Reserve"
+          "label": "Start"
         }
       ]
     },
     {
       "id": "hero",
       "kind": "hero",
-      "title": "A live painted coffee bar",
-      "subtitle": "A small autonomous cafe where every pour is measured, warm, and ready before the morning rush reaches the door.",
-      "variant": "playful",
+      "title": "A generated frontend ready to steer.",
+      "subtitle": "This starter output is neutral on purpose. Palette replaces it with real generated workspace files when the user begins painting.",
+      "eyebrow": "Generated canvas",
+      "variant": "editorial",
       "actions": [
         {
-          "label": "Join waitlist"
+          "label": "Join the list"
         },
         {
-          "label": "First tasting opens at 7:30 AM"
+          "label": "First look opens soon"
         }
       ]
     },
     {
-      "id": "note-56495e",
-      "kind": "note",
-      "title": "Studio note",
-      "subtitle": "Give this hero more wet paint texture",
-      "eyebrow": "Pinned to hero section",
-      "variant": "atelier"
-    },
-    {
-      "id": "features-1dd91d",
+      "id": "features",
       "kind": "features",
-      "title": "Three strokes of service",
-      "subtitle": "Fast enough for commuters, quiet enough for regulars.",
-      "variant": "atelier"
-    },
-    {
-      "id": "pricing-0eea21",
-      "kind": "pricing",
-      "title": "Simple cups, clear plans",
-      "subtitle": "No app maze. Walk in, tap once, leave with a perfect cup.",
-      "variant": "atelier"
-    },
-    {
-      "id": "cta-59d090",
-      "kind": "cta",
-      "title": "Join the first morning tasting.",
-      "subtitle": "Palette can still steer this surface while the canvas stays editable.",
+      "title": "What Palette keeps editable",
+      "subtitle": "Sections stay structured so the user can point, steer, and hand off the result.",
       "variant": "atelier",
+      "features": [
+        {
+          "title": "Clear first stroke",
+          "copy": "The opening section explains the product without making users decode it."
+        },
+        {
+          "title": "Human steering",
+          "copy": "Each area can be selected, revised, and polished without restarting."
+        },
+        {
+          "title": "Agent-ready files",
+          "copy": "The generated folder is structured so a coding agent can keep building."
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "kind": "cta",
+      "title": "Set the paint when the canvas feels right.",
+      "subtitle": "Download the generated files or hand the canvas to a local coding agent.",
+      "variant": "glass",
       "actions": [
         {
           "label": "Set the paint"
         }
       ]
-    },
-    {
-      "id": "footer-bdc2c5",
-      "kind": "footer",
-      "title": "Rivet & Roast",
-      "variant": "atelier",
-      "footerText": "Painted live with Palette."
     }
   ]
 }

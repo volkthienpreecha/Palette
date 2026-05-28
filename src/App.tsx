@@ -2,16 +2,22 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { AnimatePresence, motion } from "motion/react";
 import {
   Code2,
+  FileArchive,
   Download,
   FolderDown,
   ImagePlus,
   Mic,
   Pause,
+  Pin,
+  PinOff,
   Play,
+  Plus,
   Redo2,
   RotateCcw,
+  Save,
   Scissors,
   Send,
+  Trash2,
 } from "lucide-react";
 import {
   PaletteSectionView,
@@ -20,7 +26,6 @@ import {
 import {
   applyOperation,
   createBlankProject,
-  createProjectFromTemplate,
   redoProject,
   sectionStatus,
   undoProject,
@@ -29,13 +34,41 @@ import {
   type PaletteSwatch,
 } from "./paletteModel";
 import { requestCodexApply, type CodexApplyEvent } from "./codexApplyBridge";
-import { requestIntent } from "./intentBridge";
 import { requestProjectSave } from "./projectStoreBridge";
+import {
+  notesForBuild,
+  requestBuildEngineStatus,
+  requestDesignContext,
+  requestInterviewNext,
+  requestWorkspaceBundle,
+  requestWorkspaceBuild,
+  requestWorkspacePatch,
+  requestWorkspacePolish,
+  type InterviewQuestion,
+  type PaletteBrief,
+  type PaletteBuildEvent,
+  type BuildEngineStatus,
+} from "./skillBuildBridge";
 import { requestVoiceTranscription } from "./voiceBridge";
+import {
+  createHandoffBundle,
+  createPinnedNote,
+  createSubmission,
+  createSubmissionsCsv,
+  createWorkspaceState,
+  fileToPersistentSwatch,
+  loadWorkspaceState,
+  persistWorkspaceState,
+  requestWorkspaceLoad,
+  saveProjectToShelf,
+  withWorkspaceContext,
+  type PalettePinnedNote,
+  type PaletteSubmission,
+  type SavedPaletteProject,
+} from "./workspaceBridge";
 
-type Phase = "idle" | "interview" | "painting" | "paused" | "repainting" | "done";
-type ProjectTemplate = "robot-coffee" | "portfolio" | "studio-saas";
-type ProjectMood = "atelier" | "premium";
+type Phase = "idle" | "interview" | "references" | "building" | "painting" | "paused" | "repainting" | "done";
+type StudioProgressEvent = CodexApplyEvent | PaletteBuildEvent;
 type SpeechRecognitionResultLike = ArrayLike<{ readonly isFinal: boolean; 0?: { transcript: string } }>;
 type SpeechRecognitionLike = {
   continuous: boolean;
@@ -54,7 +87,9 @@ type SpeechRecognitionWindow = Window & {
 
 const phaseCopy: Record<Phase, string> = {
   idle: "Canvas is clean. Press Ctrl K and place the first brushstroke.",
-  interview: "One studio question before the first wash.",
+  interview: "A few studio questions before the first wash.",
+  references: "Pin references, links, and notes before the first paint pass.",
+  building: "Codex is painting the first real workspace files.",
   painting: "Palette is painting in layers. Press Esc to interrupt.",
   paused: "Brush lifted. Steer the surface before it sets.",
   repainting: "Palette is repainting the selected surface.",
@@ -73,30 +108,51 @@ const paintPrepDelayMs = 1050;
 const paintSectionDelayMs = 1450;
 const repaintDelayMs = 1250;
 
-const demoEditCommands = [
-  "Make the title bigger by 4pt.",
-  "Change the picture to the pasted reference.",
-  "Make the hero copy shorter and sharper.",
-  "Make this section feel more premium.",
-  "Add a note: Emphasize the morning rush use case.",
-];
+const formIntentPattern = /\b(waitlist|form|email|signup|sign up|join|reserve|book|schedule|consult|contact|lead|request)\b/i;
+
+function isInlineFormStroke(command: string) {
+  return formIntentPattern.test(command);
+}
+
+function isHeroFormAction(label: string) {
+  return formIntentPattern.test(label);
+}
 
 function App() {
-  const [project, setProject] = useState<PaletteProject>(() => createBlankProject());
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [initialWorkspace] = useState(() => loadWorkspaceState(createBlankProject()));
+  const [project, setProject] = useState<PaletteProject>(() => initialWorkspace.project);
+  const [phase, setPhase] = useState<Phase>(() =>
+    initialWorkspace.project.sections.length > 0 ? "done" : "idle",
+  );
   const [activeStep, setActiveStep] = useState(0);
   const [paintQueue, setPaintQueue] = useState<PaletteSectionModel[]>([]);
-  const [pendingTemplate, setPendingTemplate] = useState<ProjectTemplate>("robot-coffee");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialWorkspace.selectedId);
+  const [workspaceNotes, setWorkspaceNotes] = useState<PalettePinnedNote[]>(() => initialWorkspace.notes);
+  const [submissions, setSubmissions] = useState<PaletteSubmission[]>(() => initialWorkspace.submissions);
+  const [savedProjects, setSavedProjects] = useState<SavedPaletteProject[]>(
+    () => initialWorkspace.savedProjects,
+  );
+  const [noteDraft, setNoteDraft] = useState("");
   const [capsuleOpen, setCapsuleOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [listening, setListening] = useState(false);
   const [applying, setApplying] = useState(false);
   const [repoApplying, setRepoApplying] = useState(false);
   const [savingProject, setSavingProject] = useState(false);
-  const [codexEvents, setCodexEvents] = useState<CodexApplyEvent[]>([]);
-  const [status, setStatus] = useState(phaseCopy.idle);
-  const [demoEditStep, setDemoEditStep] = useState(0);
+  const [codexEvents, setCodexEvents] = useState<StudioProgressEvent[]>([]);
+  const [engineStatus, setEngineStatus] = useState<BuildEngineStatus | null>(null);
+  const [buildProjectId, setBuildProjectId] = useState<string | null>(() => initialWorkspace.buildProjectId);
+  const [brief, setBrief] = useState<PaletteBrief>(() => initialWorkspace.brief);
+  const [interviewQuestion, setInterviewQuestion] = useState<InterviewQuestion | null>(null);
+  const [interviewAnswer, setInterviewAnswer] = useState("");
+  const [interviewHistory, setInterviewHistory] = useState<Array<{ field?: string; question: string; answer: string }>>([]);
+  const [referenceDraft, setReferenceDraft] = useState("");
+  const [referenceNoteDraft, setReferenceNoteDraft] = useState("");
+  const [status, setStatus] = useState(() =>
+    initialWorkspace.project.sections.length > 0
+      ? "Restored the latest canvas from the studio shelf."
+      : phaseCopy.idle,
+  );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const projectRef = useRef<PaletteProject | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -111,6 +167,125 @@ function App() {
   }, [project]);
 
   const selectedSection = project.sections.find((section) => section.id === selectedId);
+  const includedNoteCount = workspaceNotes.filter((note) => note.includeInContext).length;
+
+  const addPinnedNote = useCallback(
+    (text: string, target = selectedSection) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setWorkspaceNotes((current) => [createPinnedNote(trimmed, target), ...current].slice(0, 12));
+      setNoteDraft("");
+      setStatus(target ? `Pinned a note to the ${target.kind} wash.` : "Pinned a note to the canvas.");
+    },
+    [selectedSection],
+  );
+
+  const toggleNoteContext = useCallback((id: string) => {
+    setWorkspaceNotes((current) =>
+      current.map((note) =>
+        note.id === id
+          ? {
+              ...note,
+              includeInContext: !note.includeInContext,
+              updatedAt: new Date().toISOString(),
+            }
+          : note,
+      ),
+    );
+  }, []);
+
+  const removePinnedNote = useCallback((id: string) => {
+    setWorkspaceNotes((current) => current.filter((note) => note.id !== id));
+  }, []);
+
+  const saveCurrentProject = useCallback(() => {
+    const result = saveProjectToShelf(project, workspaceNotes, submissions, savedProjects);
+    setProject(result.project);
+    projectRef.current = result.project;
+    setSavedProjects(result.savedProjects);
+    setStatus("Saved this canvas to the studio shelf.");
+  }, [project, savedProjects, submissions, workspaceNotes]);
+
+  const loadSavedProject = useCallback((saved: SavedPaletteProject) => {
+    setProject(saved.project);
+    projectRef.current = saved.project;
+    setWorkspaceNotes(saved.notes);
+      setSubmissions(saved.submissions);
+      setSelectedId(null);
+      setPaintQueue([]);
+      setActiveStep(0);
+      setBuildProjectId(null);
+      setBrief({});
+      setPhase(saved.project.sections.length > 0 ? "done" : "idle");
+      setStatus(`Loaded ${saved.name} from the studio shelf.`);
+  }, []);
+
+  const startNewCanvas = useCallback(() => {
+    const blank = {
+      ...createBlankProject(),
+      id: `project-${Date.now()}`,
+    };
+    setProject(blank);
+    projectRef.current = blank;
+    setWorkspaceNotes([]);
+    setSubmissions([]);
+    setSelectedId(null);
+    setPaintQueue([]);
+    setActiveStep(0);
+    setBuildProjectId(null);
+    setBrief({});
+    setInterviewQuestion(null);
+    setInterviewAnswer("");
+    setInterviewHistory([]);
+    setReferenceDraft("");
+    setReferenceNoteDraft("");
+    setCodexEvents([]);
+    setPhase("idle");
+    setStatus("A clean canvas is ready.");
+  }, []);
+
+  const exportSubmissions = useCallback(() => {
+    if (submissions.length === 0) {
+      setStatus("No submissions to export yet.");
+      return;
+    }
+
+    downloadText(createSubmissionsCsv(submissions), "palette-submissions.csv", "text/csv");
+    setStatus("Downloaded the studio submissions.");
+  }, [submissions]);
+
+  const downloadHandoffBundle = useCallback(() => {
+    if (project.sections.length === 0) {
+      setStatus("Paint needs at least one section before handoff.");
+      return;
+    }
+
+    downloadText(
+      createHandoffBundle(project, workspaceNotes, submissions),
+      "palette-handoff.json",
+      "application/json",
+    );
+    setStatus("Downloaded a handoff bundle without calling Codex.");
+  }, [project, submissions, workspaceNotes]);
+
+  const downloadWorkspaceBundle = useCallback(async () => {
+    if (!buildProjectId) {
+      setStatus("Begin painting before downloading generated files.");
+      return;
+    }
+
+    try {
+      const bundle = await requestWorkspaceBundle(buildProjectId);
+      downloadText(
+        `${JSON.stringify(bundle, null, 2)}\n`,
+        `palette-workspace-${bundle.projectId}.json`,
+        "application/json",
+      );
+      setStatus("Downloaded the generated files for your code agent.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not download generated files.");
+    }
+  }, [buildProjectId]);
 
   const stopLiveSpeechRecognition = useCallback(() => {
     const recognition = speechRecognitionRef.current;
@@ -209,27 +384,6 @@ function App() {
     setCapsuleOpen(true);
   }, [phase]);
 
-  const replaceProjectForPainting = useCallback(
-    (template: ProjectTemplate, mood: ProjectMood) => {
-      const nextProject = createProjectFromTemplate(template);
-      nextProject.swatches = project.swatches;
-      nextProject.swatchAccent = project.swatchAccent;
-      nextProject.swatchColors = project.swatchColors;
-      nextProject.theme = mood;
-      nextProject.sections = nextProject.sections.map((section) => ({
-        ...section,
-        variant: section.variant === "playful" ? "playful" : mood,
-      }));
-      setProject({ ...nextProject, sections: [] });
-      setPaintQueue(nextProject.sections);
-      setSelectedId(null);
-      setActiveStep(0);
-      setPhase("painting");
-      setStatus("The first wash is starting.");
-    },
-    [project.swatches, project.swatchAccent, project.swatchColors],
-  );
-
   const applyOneOperation = useCallback((operation: PaletteOperation) => {
     let exportText: string | undefined;
     setProject((current) => {
@@ -243,7 +397,7 @@ function App() {
   }, []);
 
   const applyOperations = useCallback((operations: PaletteOperation[]) => {
-    // projectRef is always current — set synchronously in the useEffect above
+    // projectRef is always current because useEffect keeps it synchronized.
     let next = projectRef.current!;
     let finalStatus = "";
     let exportText: string | undefined;
@@ -261,76 +415,317 @@ function App() {
     if (exportText) downloadExport(exportText);
   }, []);
 
-  const applyDirection = useCallback(
-    async (raw: string) => {
-      if (applying) return;
-      const command = raw.trim();
-      const contextProject = projectRef.current!;
-      if (!command && contextProject.sections.length === 0) {
-        setStatus("No brushstroke given.");
-        return;
-      }
-      const resolvedCommand = resolveDemoEditCommand(command, demoEditStep, contextProject.sections.length > 0);
+  const currentBuildNotes = useCallback(() => notesForBuild(workspaceNotes), [workspaceNotes]);
 
+  const recordBuildEvent = useCallback((event: PaletteBuildEvent) => {
+    setCodexEvents((current) => (event.type === "output" ? current : [...current, event].slice(-10)));
+    if (event.label) {
+      setStatus(event.type === "output" ? event.label : event.detail ? `${event.label}. ${event.detail}` : event.label);
+    }
+  }, []);
+
+  const ensureContext = useCallback(
+    async (nextBrief = brief) => {
+      const contextProject = withWorkspaceContext(projectRef.current!, workspaceNotes, submissions);
+      const result = await requestDesignContext({
+        projectId: buildProjectId,
+        brief: nextBrief,
+        references: contextProject.swatches,
+        notes: currentBuildNotes(),
+        project: contextProject,
+      });
+      setBuildProjectId(result.projectId);
+      setBrief(result.brief);
+      return result;
+    },
+    [brief, buildProjectId, currentBuildNotes, submissions, workspaceNotes],
+  );
+
+  const beginWorkspaceBuild = useCallback(
+    async (nextBrief = brief) => {
       setApplying(true);
-      setStatus("Mixing the brushstroke into safe canvas operations.");
+      setCapsuleOpen(false);
+      setPhase("building");
+      setSelectedId(null);
+      setActiveStep(0);
+      setPaintQueue([]);
+      const originalProject = projectRef.current!;
+      setProject((current) => {
+        const next = { ...current, sections: [] };
+        projectRef.current = next;
+        return next;
+      });
+      setCodexEvents([{ type: "phase", label: "Preparing the canvas", detail: "Palette is saving the design brief." }]);
 
       try {
-        const resumePainting = phase === "paused" && activeStep < paintQueue.length + paintPrepSteps.length;
-        const result = await requestIntent(resolvedCommand, { project: contextProject, selectedId });
-        const startProject = result.operations.find(
-          (operation): operation is Extract<PaletteOperation, { type: "start_project" }> =>
-            operation.type === "start_project",
+        const context = await ensureContext(nextBrief);
+        const result = await requestWorkspaceBuild(
+          {
+            projectId: context.projectId,
+            command: nextBrief.product || "Paint the first version from this brief.",
+            brief: context.brief,
+            references: context.references,
+            notes: context.notes,
+            project: withWorkspaceContext(projectRef.current!, workspaceNotes, submissions),
+          },
+          recordBuildEvent,
         );
 
-        if (startProject) {
-          setPendingTemplate(startProject.template);
-          setDemoEditStep(0);
-          setCapsuleOpen(false);
-          setPhase("interview");
+      if (!result.applied || result.project.sections.length === 0) {
+          setProject(originalProject);
+          projectRef.current = originalProject;
+          setPhase("references");
           setStatus(result.status);
           return;
         }
 
-        if (result.operations.length > 0) {
-          const premiumTheme = result.operations.some(
-            (operation) => operation.type === "set_theme" && operation.theme === "premium",
-          );
-          const atelierTheme = result.operations.some(
-            (operation) => operation.type === "set_theme" && operation.theme === "atelier",
-          );
-
-          if (premiumTheme || atelierTheme) {
-            setPaintQueue((current) =>
-              current.map((section) => ({
-                ...section,
-                variant:
-                  section.variant === "playful"
-                    ? "playful"
-                    : premiumTheme
-                      ? "premium"
-                      : "atelier",
-              })),
-            );
-          }
-
-          setCapsuleOpen(false);
-          setListening(false);
-          setPhase("repainting");
-          setStatus("Repainting the selected surface from your stroke.");
-          await wait(repaintDelayMs);
-          applyOperations(result.operations);
-          setDemoEditStep((current) => nextDemoEditStep(resolvedCommand, current));
-          setPhase(resumePainting ? "painting" : "done");
-        } else {
-          setStatus(result.status);
-        }
+        const nextProject = { ...result.project, sections: [], swatches: result.project.swatches || context.references };
+        setBuildProjectId(result.projectId || context.projectId);
+        setProject(nextProject);
+        projectRef.current = nextProject;
+        setPaintQueue(result.project.sections);
+        setPhase("painting");
+        setStatus(result.status);
       } finally {
         setApplying(false);
       }
     },
-    [activeStep, applying, applyOperations, demoEditStep, paintQueue.length, phase, selectedId],
+    [brief, ensureContext, recordBuildEvent, submissions, workspaceNotes],
   );
+
+  const addReferenceLink = useCallback(() => {
+    const value = referenceDraft.trim();
+    const note = referenceNoteDraft.trim();
+    if (!value && !note) {
+      setStatus("Paste a link or describe the reference first.");
+      return;
+    }
+
+    let url = "";
+    if (value) {
+      try {
+        const withProtocol = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+        url = new URL(withProtocol).href;
+      } catch {
+        url = "";
+      }
+    }
+
+    const title = url.includes("figma.com") ? "Figma reference" : url ? "Link reference" : "Style note";
+    applyOneOperation({
+      type: "add_swatch",
+      swatch: {
+        id: `ref-${Date.now()}`,
+        title,
+        note: note || value,
+        url,
+        tone: url.includes("figma.com") ? "glass" : "paper",
+      },
+    });
+    setReferenceDraft("");
+    setReferenceNoteDraft("");
+    setStatus(url ? "Pinned that reference link to the canvas." : "Pinned that style note to the canvas.");
+  }, [applyOneOperation, referenceDraft, referenceNoteDraft]);
+
+  const applyDirection = useCallback(
+    async (raw: string) => {
+      if (applying) return;
+      const command = raw.trim();
+      const baseProject = projectRef.current!;
+      const contextProject = withWorkspaceContext(projectForBuildContext(baseProject, paintQueue), workspaceNotes, submissions);
+      if (!command && baseProject.sections.length === 0) {
+        setStatus("No brushstroke given.");
+        return;
+      }
+
+      if (selectedSection?.kind === "hero" && isInlineFormStroke(command)) {
+        setCapsuleOpen(false);
+        setListening(false);
+        applyOneOperation({ type: "add_waitlist", id: selectedSection.id });
+        setSelectedId(selectedSection.id);
+        setStatus("Painted a form into the selected hero.");
+        return;
+      }
+
+      setApplying(true);
+      setStatus(
+        includedNoteCount > 0
+          ? `Mixing the brushstroke with ${includedNoteCount} pinned notes.`
+          : "Mixing the brushstroke into the workspace.",
+      );
+
+      try {
+        if (baseProject.sections.length === 0) {
+          const seedBrief: PaletteBrief = {
+            ...brief,
+            product: brief.product || command,
+            rawAnswers: [...(brief.rawAnswers || []), command].slice(0, 12),
+          };
+          const result = await requestInterviewNext({
+            initialPrompt: command,
+            brief: seedBrief,
+            references: contextProject.swatches,
+            notes: currentBuildNotes(),
+            history: interviewHistory,
+          });
+          setBrief(result.brief || seedBrief);
+          setInterviewQuestion(result);
+          setInterviewAnswer("");
+          setCapsuleOpen(false);
+          setPhase(result.complete ? "references" : "interview");
+          setStatus(result.status || "Palette is shaping the first brief.");
+          return;
+        }
+
+        const context = await ensureContext(brief.product ? brief : { ...brief, product: contextProject.name });
+        setCapsuleOpen(false);
+        setListening(false);
+        setPhase("repainting");
+        setCodexEvents([{ type: "phase", label: "Preparing a focused edit", detail: "Palette is sending the selected area to the build runner." }]);
+        const result = await requestWorkspacePatch(
+          {
+            projectId: context.projectId,
+            command,
+            selectedId,
+            selectedSection,
+            brief: context.brief,
+            references: context.references,
+            notes: context.notes,
+            project: contextProject,
+          },
+          recordBuildEvent,
+        );
+        await wait(repaintDelayMs);
+        if (!result.applied || result.project.sections.length === 0) {
+          setPhase("done");
+          setStatus(result.status);
+          return;
+        }
+        setBuildProjectId(result.projectId || context.projectId);
+        setProject(result.project);
+        projectRef.current = result.project;
+        setSelectedId(selectedId && result.project.sections.some((section) => section.id === selectedId) ? selectedId : null);
+        setPhase("done");
+        setStatus(result.status);
+      } finally {
+        setApplying(false);
+      }
+    },
+    [
+      applying,
+      brief,
+      currentBuildNotes,
+      ensureContext,
+      includedNoteCount,
+      interviewHistory,
+      paintQueue,
+      recordBuildEvent,
+      selectedId,
+      selectedSection,
+      submissions,
+      workspaceNotes,
+    ],
+  );
+
+  const answerInterview = useCallback(async () => {
+    if (applying || !interviewQuestion) return;
+    const answer = interviewAnswer.trim();
+    if (!answer) {
+      setStatus("Answer the studio question before moving on.");
+      return;
+    }
+
+    setApplying(true);
+    setStatus("Adding that answer to the design brief.");
+    const nextHistory = [
+      ...interviewHistory,
+      { field: interviewQuestion.field, question: interviewQuestion.question, answer },
+    ];
+
+    try {
+      const result = await requestInterviewNext({
+        answer,
+        question: interviewQuestion.question,
+        lastQuestionKey: interviewQuestion.field,
+        brief,
+        references: projectRef.current?.swatches || [],
+        notes: currentBuildNotes(),
+        history: nextHistory,
+      });
+      setInterviewHistory(nextHistory);
+      setBrief(result.brief || brief);
+      setInterviewQuestion(result);
+      setInterviewAnswer("");
+      if (result.complete) {
+        await ensureContext(result.brief || brief);
+        setPhase("references");
+        setStatus("Brief ready. Add references or begin painting.");
+      } else {
+        setStatus(result.status || "Palette has the next studio question.");
+      }
+    } finally {
+      setApplying(false);
+    }
+  }, [
+    applying,
+    brief,
+    currentBuildNotes,
+    ensureContext,
+    interviewAnswer,
+    interviewHistory,
+    interviewQuestion,
+  ]);
+
+  const moveToReferences = useCallback(async () => {
+    setApplying(true);
+    try {
+      await ensureContext(brief.product ? brief : { ...brief, product: "New Palette canvas" });
+      setPhase("references");
+      setStatus("Add references, paste screenshots, or begin painting.");
+    } finally {
+      setApplying(false);
+    }
+  }, [brief, ensureContext]);
+
+  const polishSelected = useCallback(async () => {
+    if (!selectedSection) {
+      setStatus("Select a section before asking Palette to finish it.");
+      return;
+    }
+
+    setApplying(true);
+    setPhase("repainting");
+    setCodexEvents([{ type: "phase", label: "Loading finishing pass", detail: "Palette is reading the polish skill." }]);
+
+    try {
+      const context = await ensureContext(brief.product ? brief : { ...brief, product: projectRef.current?.name || "Palette canvas" });
+      const result = await requestWorkspacePolish(
+        {
+          projectId: context.projectId,
+          command: "Make this selected section feel finished.",
+          selectedId,
+          selectedSection,
+          brief: context.brief,
+          references: context.references,
+          notes: context.notes,
+          project: withWorkspaceContext(projectRef.current!, workspaceNotes, submissions),
+        },
+        recordBuildEvent,
+      );
+      if (!result.applied || result.project.sections.length === 0) {
+        setPhase("done");
+        setStatus(result.status);
+        return;
+      }
+      setBuildProjectId(result.projectId || context.projectId);
+      setProject(result.project);
+      projectRef.current = result.project;
+      setPhase("done");
+      setStatus(result.status);
+    } finally {
+      setApplying(false);
+    }
+  }, [brief, ensureContext, recordBuildEvent, selectedId, selectedSection, submissions, workspaceNotes]);
 
   const interruptPainting = useCallback(() => {
     if (phase !== "painting") return;
@@ -383,6 +778,26 @@ function App() {
     if (result.project.exportText) downloadExport(result.project.exportText);
   }, [project]);
 
+  const handleSectionAction = useCallback(
+    (section: PaletteSectionModel, action: { label: string }) => {
+      const label = action.label.toLowerCase();
+      if (label.includes("set")) {
+        setPaint();
+        return;
+      }
+
+      if (section.kind === "hero" && isHeroFormAction(label)) {
+        applyOneOperation({ type: "add_waitlist", id: section.id });
+        setSelectedId(section.id);
+        return;
+      }
+
+      setStatus(`Selected the ${section.kind} wash for the next stroke.`);
+      setSelectedId(section.id);
+    },
+    [applyOneOperation, setPaint],
+  );
+
   const applyToRepo = useCallback(async () => {
     if (project.sections.length === 0) {
       setStatus("Paint needs at least one section before Codex can apply it.");
@@ -392,7 +807,7 @@ function App() {
     setRepoApplying(true);
     setCodexEvents([{ type: "phase", label: "Preparing Codex handoff", detail: "The canvas is being packed." }]);
     setStatus("Handing the canvas to Codex for repo edits.");
-    const result = await requestCodexApply(project, (event) => {
+    const result = await requestCodexApply(withWorkspaceContext(project, workspaceNotes, submissions), (event) => {
       setCodexEvents((current) => (event.type === "output" ? current : [...current, event].slice(-10)));
       if (event.label) {
         setStatus(event.type === "output" ? event.label : event.detail ? `${event.label}. ${event.detail}` : event.label);
@@ -400,7 +815,7 @@ function App() {
     });
     setRepoApplying(false);
     setStatus(result.status);
-  }, [project]);
+  }, [project, submissions, workspaceNotes]);
 
   const saveToFolder = useCallback(async () => {
     if (project.sections.length === 0) {
@@ -410,10 +825,10 @@ function App() {
 
     setSavingProject(true);
     setStatus("Saving the canvas as a Codex-readable folder.");
-    const result = await requestProjectSave(project);
+    const result = await requestProjectSave(withWorkspaceContext(project, workspaceNotes, submissions));
     setSavingProject(false);
     setStatus(result.folder ? `${result.status} ${result.folder}` : result.status);
-  }, [project]);
+  }, [project, submissions, workspaceNotes]);
 
   const finishVoiceRecording = useCallback(
     async (audio: Blob) => {
@@ -525,34 +940,38 @@ function App() {
     [openCommandCapsule, phase],
   );
 
+  const recordSubmission = useCallback(
+    (section: PaletteSectionModel, values: Record<string, FormDataEntryValue>) => {
+      const submission = createSubmission(projectRef.current ?? project, section, values);
+      setSubmissions((current) => [submission, ...current].slice(0, 40));
+      setStatus(
+        submission.kind === "waitlist"
+          ? "Pinned the waitlist signup to submissions."
+          : "Pinned the contact note to submissions.",
+      );
+    },
+    [project],
+  );
+
   const addFiles = useCallback(
-    (files: FileList | File[]) => {
+    async (files: FileList | File[]) => {
       const imageFiles = Array.from(files).filter((file) => file.type.startsWith("image/"));
       if (imageFiles.length === 0) return;
 
       for (const file of imageFiles) {
-        const url = URL.createObjectURL(file);
-        const id = `${file.name || "clipboard-reference"}-${Date.now()}`;
-        const title = file.name?.replace(/\.[^.]+$/, "") || "Clipboard reference";
-        const swatch: PaletteSwatch = {
-          id,
-          title,
-          note: "Pinned visual reference.",
-          url,
-          colors: [],
-        };
+        const swatch: PaletteSwatch = await fileToPersistentSwatch(file);
         applyOneOperation({ type: "add_swatch", swatch });
 
-        extractColors(url).then((colors) => {
+        extractColors(swatch.url ?? "").then((colors) => {
           if (colors.length === 0) return;
           const note = `Mixed ${colors.slice(0, 2).join(" and ")} from this reference.`;
           setProject((current) => {
             const next = {
               ...current,
-              swatchAccent: current.swatches[0]?.id === id ? colors[0] : current.swatchAccent,
-              swatchColors: current.swatches[0]?.id === id ? colors : current.swatchColors,
+              swatchAccent: current.swatches[0]?.id === swatch.id ? colors[0] : current.swatchAccent,
+              swatchColors: current.swatches[0]?.id === swatch.id ? colors : current.swatchColors,
               swatches: current.swatches.map((item) =>
-                item.id === id ? { ...item, note, colors } : item,
+                item.id === swatch.id ? { ...item, note, colors } : item,
               ),
             };
             projectRef.current = next;
@@ -560,6 +979,7 @@ function App() {
           });
         });
       }
+      setStatus(`${imageFiles.length} reference${imageFiles.length === 1 ? "" : "s"} pinned to the canvas.`);
     },
     [applyOneOperation],
   );
@@ -681,6 +1101,64 @@ function App() {
     return () => window.removeEventListener("paste", onPaste);
   }, [addFiles]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void requestWorkspaceLoad().then((workspace) => {
+      if (!workspace || cancelled) return;
+      setProject(workspace.project);
+      projectRef.current = workspace.project;
+      setWorkspaceNotes(workspace.notes);
+      setSubmissions(workspace.submissions);
+      setSavedProjects(workspace.savedProjects);
+      setSelectedId(workspace.selectedId);
+      setBuildProjectId(workspace.buildProjectId);
+      setBrief(workspace.brief);
+      setPhase(workspace.project.sections.length > 0 ? "done" : "idle");
+      setStatus("Restored the latest canvas from the workspace store.");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void requestBuildEngineStatus()
+      .then((result) => {
+        if (!cancelled) setEngineStatus(result);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setEngineStatus({
+            ok: false,
+            selectedProvider: "codex",
+            configuredProvider: "unknown",
+            label: "Painter offline",
+            ready: false,
+            model: "",
+            detail: error instanceof Error ? error.message : "Start the Palette backend to check the live painting engine.",
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    persistWorkspaceState(
+      createWorkspaceState({
+        project,
+        selectedId,
+        buildProjectId,
+        brief,
+        notes: workspaceNotes,
+        submissions,
+        savedProjects,
+      }),
+    );
+  }, [brief, buildProjectId, project, savedProjects, selectedId, submissions, workspaceNotes]);
+
   const shellStyle = project.swatchAccent
     ? ({ "--swatch-accent": project.swatchAccent } as CSSProperties)
     : undefined;
@@ -708,15 +1186,33 @@ function App() {
       <section className="studio-grid">
         <ReferenceSwatches
           project={project}
+          notes={workspaceNotes}
+          noteDraft={noteDraft}
+          submissions={submissions}
+          savedProjects={savedProjects}
+          selectedSection={selectedSection}
           onFiles={addFiles}
           onPickFiles={() => fileInputRef.current?.click()}
+          onNoteDraft={setNoteDraft}
+          onAddNote={() => addPinnedNote(noteDraft)}
+          onToggleNoteContext={toggleNoteContext}
+          onRemoveNote={removePinnedNote}
+          onSaveProject={saveCurrentProject}
+          onLoadProject={loadSavedProject}
+          onNewCanvas={startNewCanvas}
+          onExportSubmissions={exportSubmissions}
+          onDownloadHandoff={downloadHandoffBundle}
+          onDownloadWorkspace={downloadWorkspaceBundle}
+          canDownloadWorkspace={Boolean(buildProjectId)}
           onUndo={undo}
           onRedo={redo}
           onSetPaint={setPaint}
           onSaveFolder={saveToFolder}
           onApplyToRepo={applyToRepo}
+          onPolish={polishSelected}
           savingProject={savingProject}
           repoApplying={repoApplying}
+          engineStatus={engineStatus}
           codexEvents={codexEvents}
         />
 
@@ -724,7 +1220,7 @@ function App() {
           <p className="sr-status" aria-live="polite">{status}</p>
 
           <div
-            className={`canvas-board ${phase === "painting" || phase === "repainting" ? "is-painting" : ""} ${
+            className={`canvas-board ${phase === "painting" || phase === "building" || phase === "repainting" ? "is-painting" : ""} ${
               phase === "repainting" ? "is-repainting" : ""
             }`}
             onDragOver={(event) => event.preventDefault()}
@@ -762,15 +1258,74 @@ function App() {
                   transition={{ duration: 0.46, ease: [0.16, 1, 0.3, 1] }}
                 >
                   <span>Prime the canvas</span>
-                  <h2>Should this first wash feel premium or editorial?</h2>
+                  <h2>{interviewQuestion?.question || "What are we making?"}</h2>
+                  {interviewQuestion?.helper ? <p>{interviewQuestion.helper}</p> : null}
+                  <textarea
+                    value={interviewAnswer}
+                    onChange={(event) => setInterviewAnswer(event.target.value)}
+                    placeholder="Answer like you are talking to a collaborator"
+                    aria-label="Design interview answer"
+                  />
                   <div className="interview-options">
-                    <button type="button" onClick={() => replaceProjectForPainting(pendingTemplate, "premium")}>
-                      Premium, but still charming
+                    <button type="button" onClick={answerInterview} disabled={applying || !interviewAnswer.trim()}>
+                      Answer
                     </button>
-                    <button type="button" onClick={() => replaceProjectForPainting(pendingTemplate, "atelier")}>
-                      Quiet and editorial
+                    <button type="button" onClick={moveToReferences} disabled={applying}>
+                      Add references
                     </button>
                   </div>
+                </motion.div>
+              ) : null}
+
+              {phase === "references" ? (
+                <motion.div
+                  className="interview-card reference-board-card"
+                  key="references"
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <span>Gather references</span>
+                  <h2>Pin the images, links, or notes Palette should study.</h2>
+                  <p>Paste screenshots anywhere, drop images here, or add a website or Figma link.</p>
+                  <div className="reference-inputs">
+                    <input
+                      value={referenceDraft}
+                      onChange={(event) => setReferenceDraft(event.target.value)}
+                      placeholder="Paste a website or Figma link"
+                      aria-label="Reference link"
+                    />
+                    <textarea
+                      value={referenceNoteDraft}
+                      onChange={(event) => setReferenceNoteDraft(event.target.value)}
+                      placeholder="What should Palette notice about it?"
+                      aria-label="Reference note"
+                    />
+                  </div>
+                  <div className="interview-options">
+                    <button type="button" onClick={addReferenceLink}>
+                      Pin reference
+                    </button>
+                    <button type="button" onClick={() => void beginWorkspaceBuild(brief)} disabled={applying}>
+                      Begin painting
+                    </button>
+                  </div>
+                </motion.div>
+              ) : null}
+
+              {phase === "building" ? (
+                <motion.div
+                  className="interview-card reference-board-card"
+                  key="building"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <span>Painting with Codex</span>
+                  <h2>The first real workspace is being written.</h2>
+                  <p>{status}</p>
                 </motion.div>
               ) : null}
             </AnimatePresence>
@@ -785,6 +1340,8 @@ function App() {
                 onRemove={removeSection}
                 onNote={noteSection}
                 onSetPaint={setPaint}
+                onAction={handleSectionAction}
+                onSubmitForm={recordSubmission}
               />
             ) : null}
           </div>
@@ -825,28 +1382,64 @@ function App() {
 
 function ReferenceSwatches({
   project,
+  notes,
+  noteDraft,
+  submissions,
+  savedProjects,
+  selectedSection,
   onFiles,
   onPickFiles,
+  onNoteDraft,
+  onAddNote,
+  onToggleNoteContext,
+  onRemoveNote,
+  onSaveProject,
+  onLoadProject,
+  onNewCanvas,
+  onExportSubmissions,
+  onDownloadHandoff,
+  onDownloadWorkspace,
+  canDownloadWorkspace,
   onUndo,
   onRedo,
   onSetPaint,
   onSaveFolder,
   onApplyToRepo,
+  onPolish,
   savingProject,
   repoApplying,
+  engineStatus,
   codexEvents,
 }: {
   project: PaletteProject;
+  notes: PalettePinnedNote[];
+  noteDraft: string;
+  submissions: PaletteSubmission[];
+  savedProjects: SavedPaletteProject[];
+  selectedSection?: PaletteSectionModel;
   onFiles: (files: FileList | File[]) => void;
   onPickFiles: () => void;
+  onNoteDraft: (value: string) => void;
+  onAddNote: () => void;
+  onToggleNoteContext: (id: string) => void;
+  onRemoveNote: (id: string) => void;
+  onSaveProject: () => void;
+  onLoadProject: (project: SavedPaletteProject) => void;
+  onNewCanvas: () => void;
+  onExportSubmissions: () => void;
+  onDownloadHandoff: () => void;
+  onDownloadWorkspace: () => void;
+  canDownloadWorkspace: boolean;
   onUndo: () => void;
   onRedo: () => void;
   onSetPaint: () => void;
   onSaveFolder: () => void;
   onApplyToRepo: () => void;
+  onPolish: () => void;
   savingProject: boolean;
   repoApplying: boolean;
-  codexEvents: CodexApplyEvent[];
+  engineStatus: BuildEngineStatus | null;
+  codexEvents: StudioProgressEvent[];
 }) {
   return (
     <aside className="swatch-panel">
@@ -869,6 +1462,14 @@ function ReferenceSwatches({
           <Download size={14} />
           Set paint
         </button>
+        <button type="button" onClick={onDownloadHandoff} disabled={project.sections.length === 0}>
+          <FileArchive size={14} />
+          Handoff
+        </button>
+        <button type="button" onClick={onDownloadWorkspace} disabled={!canDownloadWorkspace}>
+          <FolderDown size={14} />
+          Download files
+        </button>
         <button
           className="folder-action"
           type="button"
@@ -888,6 +1489,24 @@ function ReferenceSwatches({
           {repoApplying ? "Applying" : "Codex apply"}
         </button>
       </div>
+      <BuildEngineCard status={engineStatus} />
+      <WorkspacePanel
+        project={project}
+        notes={notes}
+        noteDraft={noteDraft}
+        submissions={submissions}
+        savedProjects={savedProjects}
+        selectedSection={selectedSection}
+        onNoteDraft={onNoteDraft}
+        onAddNote={onAddNote}
+        onToggleNoteContext={onToggleNoteContext}
+        onRemoveNote={onRemoveNote}
+        onSaveProject={onSaveProject}
+        onLoadProject={onLoadProject}
+        onNewCanvas={onNewCanvas}
+        onExportSubmissions={onExportSubmissions}
+        onPolish={onPolish}
+      />
       <CodexProgress events={codexEvents} active={repoApplying} />
       <div
         className="drop-target"
@@ -900,8 +1519,8 @@ function ReferenceSwatches({
         Drop or paste references
       </div>
       <div className="swatch-list">
-        {project.swatches.map((swatch) => (
-          <article className={`swatch-card tone-${swatch.tone ?? "paper"}`} key={swatch.id}>
+        {project.swatches.map((swatch, index) => (
+          <article className={`swatch-card tone-${swatch.tone ?? "paper"}`} key={swatch.id || `${swatch.title}-${index}`}>
             <div
               className="swatch-image"
               style={
@@ -910,7 +1529,7 @@ function ReferenceSwatches({
                   : undefined
               }
             >
-              {swatch.url ? <img src={swatch.url} alt="" /> : <span />}
+              {isImageReferenceUrl(swatch.url) ? <img src={swatch.url} alt="" /> : <span />}
             </div>
             <h3>{swatch.title}</h3>
             <p>{swatch.note}</p>
@@ -922,12 +1541,163 @@ function ReferenceSwatches({
   );
 }
 
-function CodexProgress({ events, active }: { events: CodexApplyEvent[]; active: boolean }) {
+function BuildEngineCard({ status }: { status: BuildEngineStatus | null }) {
+  const label = status?.label || "Checking painter";
+  const detail = status?.detail || "Palette is checking which live engine will paint the next workspace.";
+  const model = status?.model;
+
+  return (
+    <section className={`engine-card ${status?.ready ? "is-ready" : "needs-setup"}`} aria-label="Live painting engine">
+      <div>
+        <span>Live painter</span>
+        <strong>{label}</strong>
+      </div>
+      <p>{detail}</p>
+      {model ? <small>{model}</small> : null}
+    </section>
+  );
+}
+
+function WorkspacePanel({
+  project,
+  notes,
+  noteDraft,
+  submissions,
+  savedProjects,
+  selectedSection,
+  onNoteDraft,
+  onAddNote,
+  onToggleNoteContext,
+  onRemoveNote,
+  onSaveProject,
+  onLoadProject,
+  onNewCanvas,
+  onExportSubmissions,
+  onPolish,
+}: {
+  project: PaletteProject;
+  notes: PalettePinnedNote[];
+  noteDraft: string;
+  submissions: PaletteSubmission[];
+  savedProjects: SavedPaletteProject[];
+  selectedSection?: PaletteSectionModel;
+  onNoteDraft: (value: string) => void;
+  onAddNote: () => void;
+  onToggleNoteContext: (id: string) => void;
+  onRemoveNote: (id: string) => void;
+  onSaveProject: () => void;
+  onLoadProject: (project: SavedPaletteProject) => void;
+  onNewCanvas: () => void;
+  onExportSubmissions: () => void;
+  onPolish: () => void;
+}) {
+  const includedCount = notes.filter((note) => note.includeInContext).length;
+
+  return (
+    <section className="workspace-panel" aria-label="Workspace">
+      <div className="workspace-block">
+        <div className="workspace-heading">
+          <span>Studio shelf</span>
+          <small>{project.name}</small>
+        </div>
+        <div className="workspace-actions">
+          <button type="button" onClick={onSaveProject}>
+            <Save size={14} />
+            Save project
+          </button>
+          <button type="button" onClick={onNewCanvas}>
+            <Plus size={14} />
+            New canvas
+          </button>
+        </div>
+        {savedProjects.length > 0 ? (
+          <div className="project-shelf">
+            {savedProjects.slice(0, 4).map((saved) => (
+              <button type="button" key={saved.id} onClick={() => onLoadProject(saved)}>
+                <strong>{saved.name}</strong>
+                <span>{saved.project.sections.length} sections</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="workspace-block">
+        <div className="workspace-heading">
+          <span>Pinned notes</span>
+          <small>{includedCount} in context</small>
+        </div>
+        <div className="note-composer">
+          <textarea
+            value={noteDraft}
+            onChange={(event) => onNoteDraft(event.target.value)}
+            placeholder="Pin a note for the next stroke"
+            aria-label="Pinned note"
+          />
+          <button type="button" onClick={onAddNote} disabled={!noteDraft.trim()}>
+            <Pin size={14} />
+            Pin note
+          </button>
+          <button type="button" onClick={onPolish} disabled={!selectedSection}>
+            <Scissors size={14} />
+            Make this feel finished
+          </button>
+        </div>
+        <div className="note-list">
+          {notes.slice(0, 5).map((note) => (
+            <article key={note.id}>
+              <p>{note.text}</p>
+              <div>
+                <button
+                  type="button"
+                  aria-pressed={note.includeInContext}
+                  onClick={() => onToggleNoteContext(note.id)}
+                >
+                  {note.includeInContext ? <Pin size={13} /> : <PinOff size={13} />}
+                  {note.includeInContext ? "Context" : "Held"}
+                </button>
+                <button type="button" onClick={() => onRemoveNote(note.id)} aria-label="Remove pinned note">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      <div className="workspace-block">
+        <div className="workspace-heading">
+          <span>Submissions</span>
+          <small>{submissions.length}</small>
+        </div>
+        <div className="submission-list">
+          {submissions.slice(0, 4).map((submission) => (
+            <article key={submission.id}>
+              <strong>{submission.kind}</strong>
+              <p>{submission.values.email || submission.values.name || submission.sectionTitle}</p>
+            </article>
+          ))}
+        </div>
+        <button
+          className="export-submissions"
+          type="button"
+          onClick={onExportSubmissions}
+          disabled={submissions.length === 0}
+        >
+          <Download size={14} />
+          Export submissions
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function CodexProgress({ events, active }: { events: StudioProgressEvent[]; active: boolean }) {
   if (events.length === 0) return null;
 
   return (
     <section className={`codex-progress ${active ? "is-active" : ""}`} aria-label="Codex progress">
-      <h2>Codex progress</h2>
+      <h2>Build progress</h2>
       {events.slice(-7).map((event, index) => (
         <article key={`${event.at ?? index}-${event.label}`}>
           <strong>{event.label}</strong>
@@ -961,6 +1731,8 @@ function GeneratedPage({
   onRemove,
   onNote,
   onSetPaint,
+  onAction,
+  onSubmitForm,
 }: {
   sections: PaletteSectionModel[];
   theme: string;
@@ -970,6 +1742,8 @@ function GeneratedPage({
   onRemove: (id: string) => void;
   onNote: (section: PaletteSectionModel) => void;
   onSetPaint: () => void;
+  onAction: (section: PaletteSectionModel, action: { label: string }) => void;
+  onSubmitForm: (section: PaletteSectionModel, values: Record<string, FormDataEntryValue>) => void;
 }) {
   return (
     <motion.div
@@ -999,7 +1773,9 @@ function GeneratedPage({
                 onNote,
                 onAction: (_section, action) => {
                   if (action.label.toLowerCase().includes("set")) onSetPaint();
+                  else onAction(_section, action);
                 },
+                onSubmitForm,
               }}
             />
           </motion.div>
@@ -1141,11 +1917,15 @@ function CommandCapsule({
 }
 
 function downloadExport(text: string) {
-  const blob = new Blob([text], { type: "application/json" });
+  downloadText(text, "palette-project.json", "application/json");
+}
+
+function downloadText(text: string, filename: string, type: string) {
+  const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = "palette-project.json";
+  anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -1207,66 +1987,18 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function resolveDemoEditCommand(command: string, currentStep: number, hasCanvas: boolean) {
-  const explicitStep = demoStepIndexFromCommand(command);
-  if (explicitStep !== null) return demoEditCommands[explicitStep];
-
-  const text = normalizeDemoCommand(command);
-  if (["next", "next edit", "continue", "do the next one", "run the next one"].includes(text)) {
-    return demoEditCommands[currentStep] ?? command;
-  }
-
-  const inferredStep = inferDemoEditStep(command);
-  if (inferredStep !== null) return demoEditCommands[inferredStep];
-
-  if (hasCanvas && currentStep < demoEditCommands.length) {
-    return demoEditCommands[currentStep];
-  }
-
-  return command;
+function projectForBuildContext(project: PaletteProject, queuedSections: PaletteSectionModel[]) {
+  if (queuedSections.length === 0) return project;
+  const seen = new Set(project.sections.map((section) => section.id));
+  const remaining = queuedSections.filter((section) => !seen.has(section.id));
+  return remaining.length > 0
+    ? { ...project, sections: [...project.sections, ...remaining] }
+    : project;
 }
 
-function nextDemoEditStep(command: string, currentStep: number) {
-  const explicitStep = demoEditCommands.findIndex(
-    (demoCommand) => normalizeDemoCommand(demoCommand) === normalizeDemoCommand(command),
-  );
-  if (explicitStep >= 0) return Math.min(demoEditCommands.length, Math.max(currentStep, explicitStep + 1));
-
-  const inferredStep = inferDemoEditStep(command);
-  if (inferredStep !== null) return Math.min(demoEditCommands.length, Math.max(currentStep, inferredStep + 1));
-
-  return currentStep;
-}
-
-function demoStepIndexFromCommand(command: string) {
-  const text = normalizeDemoCommand(command);
-  const aliases = [
-    ["1", "one", "first", "step 1", "step one", "edit 1", "edit one"],
-    ["2", "two", "second", "step 2", "step two", "edit 2", "edit two"],
-    ["3", "three", "third", "step 3", "step three", "edit 3", "edit three"],
-    ["4", "four", "fourth", "step 4", "step four", "edit 4", "edit four"],
-    ["5", "five", "fifth", "step 5", "step five", "edit 5", "edit five"],
-  ];
-  const index = aliases.findIndex((group) => group.includes(text));
-  return index >= 0 ? index : null;
-}
-
-function inferDemoEditStep(command: string) {
-  const text = normalizeDemoCommand(command);
-  if (text.includes("title") && (text.includes("bigger") || text.includes("larger"))) return 0;
-  if ((text.includes("image") || text.includes("picture") || text.includes("photo")) && text.includes("change")) return 1;
-  if (text.includes("copy") && (text.includes("shorter") || text.includes("sharper"))) return 2;
-  if (text.includes("premium")) return 3;
-  if (text.includes("note")) return 4;
-  return null;
-}
-
-function normalizeDemoCommand(command: string) {
-  return command
-    .trim()
-    .toLowerCase()
-    .replace(/[^\w\s]/g, "")
-    .replace(/\s+/g, " ");
+function isImageReferenceUrl(url?: string) {
+  if (!url) return false;
+  return url.startsWith("data:image/") || /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(url);
 }
 
 function imageFilesFromClipboard(data: DataTransfer) {

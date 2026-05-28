@@ -95,8 +95,8 @@ Every generated section supports six visual variants:
 ## Technical Details
 
 - **Frontend** — React 19, TypeScript, Vite, Framer Motion
-- **Backend** — Node.js HTTP server (no framework), streams Codex apply progress via NDJSON
-- **AI** — OpenAI Responses API for intent resolution, Codex CLI for repo apply, Groq Whisper for voice
+- **Backend** — Node.js HTTP server (no framework), streams build and Codex apply progress via NDJSON
+- **AI** — real skill-backed build runner with Groq/OpenAI/Codex provider selection, Codex CLI for repo apply, Groq Whisper for voice
 - **Canvas model** — fully typed operation model with undo/redo history, export, and Codex-readable folder save
 
 ---
@@ -117,12 +117,4 @@ npm run dev   # frontend on :5173
 
 ## Demo Flow
 
-1. Open `http://localhost:5173`
-2. Click **Begin with a brushstroke**
-3. Type: `Build a landing page for a robot coffee shop`
-4. Pick a style — watch the canvas paint
-5. Press **Escape** mid-paint to interrupt
-6. Click the hero section — type: `make this playful`
-7. Click **Codex apply** — watch it write real files
-
-The whole arc takes under two minutes.
+The old stage script now lives in [docs/demo-sequence.md](docs/demo-sequence.md). The normal app flow uses the real interview, reference board, Codex build, steering, and polish path.

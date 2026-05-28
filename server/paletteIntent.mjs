@@ -37,7 +37,7 @@ const patchKeys = new Set([
   "gallery",
 ]);
 
-export async function resolveIntent(payload, env = process.env) {
+export async function resolvePlanner(payload, env = process.env) {
   const request = normalizeRequest(payload);
   const local = parseLocalIntent(request);
 
@@ -46,6 +46,7 @@ export async function resolveIntent(payload, env = process.env) {
       operations: local.operations,
       status: local.status,
       source: "local",
+      provider: "local",
     };
   }
 
@@ -54,42 +55,65 @@ export async function resolveIntent(payload, env = process.env) {
       operations: local.operations,
       status: local.status,
       source: "local",
+      provider: "local",
     };
   }
 
-  if (!openAiKey(env)) {
+  const provider = selectPlannerProvider(env);
+  if (provider.name === "local") {
     return {
       operations: local.operations,
-      status: `No OPENAI_API_KEY or CODEX_API_KEY set. ${local.status}`,
+      status: local.status,
       source: "local",
+      provider: "local",
+    };
+  }
+
+  if (!provider.available) {
+    return {
+      operations: local.operations,
+      status: `${provider.unavailableReason} ${local.status}`,
+      source: "local",
+      provider: provider.name,
     };
   }
 
   try {
-    const generated = await callOpenAI(request, env);
+    const generated = await callPlannerProvider(request, provider, env);
     const validated = validateIntentResult(generated, request);
 
     if (validated.operations.length === 0) {
       return {
         operations: local.operations,
-        status: `OpenAI returned no valid Palette operations. ${local.status}`,
+        status: `Planner returned no valid Palette operations. ${local.status}`,
         source: "fallback",
+        provider: provider.name,
       };
     }
 
     return {
       operations: validated.operations,
       status: validated.status || "Translated the stroke into safe Palette operations.",
-      source: "openai",
+      source: "provider",
+      provider: provider.name,
     };
   } catch (error) {
     return {
       operations: local.operations,
-      status: `OpenAI bridge unavailable. ${local.status}`,
+      status: `Planner bridge unavailable. ${local.status}`,
       source: "fallback",
+      provider: provider.name,
       detail: error instanceof Error ? error.message : "Unknown bridge error",
     };
   }
+}
+
+export async function resolveIntent(payload, env = process.env) {
+  const result = await resolvePlanner(payload, env);
+  return {
+    ...result,
+    source: result.source === "provider" && result.provider === "openai" ? "openai" : result.source,
+  };
 }
 
 function normalizeRequest(payload) {
@@ -100,8 +124,101 @@ function normalizeRequest(payload) {
   const command = typeof payload.command === "string" ? payload.command.trim() : "";
   const selectedId = typeof payload.selectedId === "string" ? payload.selectedId : null;
   const project = payload.project && typeof payload.project === "object" ? payload.project : {};
+  const selectedSection = summarizeSelectedSection(payload.selectedSection, project, selectedId);
+  const notes = summarizeNotes(payload.notes, project);
+  const references = summarizeReferences(payload.references, project);
 
-  return { command, selectedId, project };
+  return { command, selectedId, project, selectedSection, notes, references };
+}
+
+function summarizeSelectedSection(selectedSection, project, selectedId) {
+  if (selectedSection && typeof selectedSection === "object") {
+    return summarizeSectionForPlanner(selectedSection);
+  }
+
+  const sections = Array.isArray(project.sections) ? project.sections : [];
+  const section = selectedId ? sections.find((item) => item.id === selectedId) : undefined;
+  return section ? summarizeSectionForPlanner(section) : null;
+}
+
+function summarizeNotes(notes, project) {
+  const explicitNotes = Array.isArray(notes)
+    ? notes.map((note) => sanitizePlannerNote(note)).filter(Boolean)
+    : [];
+  const sectionNotes = Array.isArray(project.sections)
+    ? project.sections
+        .filter((section) => section?.kind === "note")
+        .map((section) => sanitizePlannerNote({
+          id: section.id,
+          title: section.title,
+          note: section.subtitle,
+          pinnedTo: section.eyebrow,
+        }))
+        .filter(Boolean)
+    : [];
+
+  return dedupeContext([...explicitNotes, ...sectionNotes]).slice(0, 10);
+}
+
+function summarizeReferences(references, project) {
+  const source = Array.isArray(references)
+    ? references
+    : Array.isArray(project.swatches)
+      ? project.swatches
+      : [];
+
+  return source.map((reference) => sanitizePlannerReference(reference)).filter(Boolean).slice(0, 10);
+}
+
+function summarizeSectionForPlanner(section) {
+  return dropUndefined({
+    id: cleanId(section.id),
+    kind: sectionKinds.has(section.kind) ? section.kind : undefined,
+    title: cleanText(section.title, 100),
+    subtitle: cleanText(section.subtitle, 180),
+    eyebrow: cleanText(section.eyebrow, 80),
+    variant: sectionVariants.has(section.variant) ? section.variant : undefined,
+  });
+}
+
+function sanitizePlannerNote(note) {
+  if (typeof note === "string") {
+    const cleaned = cleanText(note, 220);
+    return cleaned ? { note: cleaned } : null;
+  }
+  if (!note || typeof note !== "object") return null;
+
+  const cleaned = dropUndefined({
+    id: cleanId(note.id),
+    title: cleanText(note.title, 80),
+    note: cleanText(note.note || note.subtitle || note.detail, 220),
+    pinnedTo: cleanText(note.pinnedTo || note.eyebrow, 100),
+  });
+  return cleaned.note ? cleaned : null;
+}
+
+function sanitizePlannerReference(reference) {
+  if (!reference || typeof reference !== "object") return null;
+
+  const cleaned = dropUndefined({
+    id: cleanId(reference.id),
+    title: cleanText(reference.title, 80),
+    note: cleanText(reference.note || reference.subtitle || reference.detail, 180),
+    url: cleanHref(reference.url),
+    tone: ["paper", "glass", "ink"].includes(reference.tone) ? reference.tone : undefined,
+    colors: arrayOf(reference.colors, 5).map(cleanColor).filter(Boolean),
+  });
+  return cleaned.title || cleaned.note || cleaned.url ? cleaned : null;
+}
+
+function dedupeContext(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item.id || item.note || item.title;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function parseLocalIntent({ command, selectedId, project }) {
@@ -541,6 +658,34 @@ function latestImageReference(project) {
   };
 }
 
+function selectPlannerProvider(env) {
+  const requested = cleanText(env.PALETTE_PLANNER_PROVIDER || env.PALETTE_AI_PROVIDER || "openai", 40).toLowerCase();
+  if (!requested || requested === "local") {
+    return { name: "local", available: false, unavailableReason: "" };
+  }
+
+  if (requested === "openai") {
+    return openAiKey(env)
+      ? { name: "openai", available: true }
+      : {
+          name: "openai",
+          available: false,
+          unavailableReason: "No OPENAI_API_KEY or CODEX_API_KEY set.",
+        };
+  }
+
+  return {
+    name: requested,
+    available: false,
+    unavailableReason: `Planner provider "${requested}" is not configured.`,
+  };
+}
+
+async function callPlannerProvider(request, provider, env) {
+  if (provider.name === "openai") return callOpenAI(request, env);
+  throw new Error(`Unsupported planner provider: ${provider.name}`);
+}
+
 async function callOpenAI(request, env) {
   const model = env.OPENAI_MODEL || "gpt-4.1-mini";
   const body = {
@@ -552,7 +697,8 @@ async function callOpenAI(request, env) {
           {
             type: "input_text",
             text:
-              "You translate Palette canvas steering commands into PaletteOperation JSON only. " +
+              "You are the Palette planner. Translate canvas steering commands into PaletteOperation JSON only. " +
+              "Use the selected section, pinned notes, and reference swatches as context for the smallest safe operation. " +
               "Return safe operations from the allowlist. Do not return code, prose outside JSON, CSS, scripts, or arbitrary state. " +
               "Never return an empty operations array when the command clearly maps to an allowed operation. " +
               "Rules: darker, premium, black, luxury -> set_theme premium and set_variant premium for existing sections. " +
@@ -575,6 +721,9 @@ async function callOpenAI(request, env) {
             text: JSON.stringify({
               command: request.command,
               selectedId: request.selectedId,
+              selectedSection: request.selectedSection,
+              notes: request.notes,
+              references: request.references,
               currentSections: summarizeSections(request.project),
               allowedOperationTypes: [
                 "start_project",
@@ -596,7 +745,7 @@ async function callOpenAI(request, env) {
     text: {
       format: {
         type: "json_schema",
-        name: "palette_intent_result",
+        name: "palette_planner_result",
         strict: false,
         schema: {
           type: "object",
@@ -640,7 +789,7 @@ function openAiKey(env) {
 
 function validateIntentResult(result, request) {
   if (!result || typeof result !== "object" || !Array.isArray(result.operations)) {
-    return { operations: [], status: "OpenAI did not return an operation list." };
+    return { operations: [], status: "Planner did not return an operation list." };
   }
 
   const operations = result.operations

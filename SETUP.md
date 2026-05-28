@@ -5,7 +5,7 @@ Palette is a local demo app for painting a frontend into code. You start with a 
 The project has two parts:
 
 - The frontend: the app you open in the browser.
-- The backend: local API routes for AI intent, voice transcription, saving folders, and Codex repo apply.
+- The backend: local API routes for skill-backed building, steering, voice transcription, saving folders, and Codex repo apply.
 
 ## What You Need
 
@@ -13,9 +13,9 @@ Install these first:
 
 - Node.js 20 or newer.
 - npm, which comes with Node.
-- Codex Desktop or Codex CLI if you want the real `Codex apply` button.
-- A Groq API key if you want voice transcription.
-- An OpenAI API key if you want the remote intent bridge. Without this, Palette still works with its local demo parser.
+- A Groq API key if you want real AI painting now and voice transcription.
+- Codex Desktop or Codex CLI if you want to force the Codex build provider or use the `Codex apply` button.
+- An OpenAI API key if you want OpenAI/Codex-provider builds. Without a valid OpenAI key, Palette can still build through Groq.
 
 ## First Setup
 
@@ -73,41 +73,44 @@ Open the URL Vite prints. It is usually:
 http://127.0.0.1:5173/
 ```
 
-## Demo Flow
+## First Run Flow
 
-Use this path for the hackathon demo:
+Use this path to verify the real build loop:
 
 1. Open the app.
 2. Click `Begin with a brushstroke`.
-3. Use the default prompt, or type:
+3. Describe the frontend you want:
 
 ```text
-Build a landing page for a robot coffee shop.
+Build a landing page for a ceramic dental studio.
 ```
 
-4. Pick one of the style answers.
-5. Watch the page paint in sections.
-6. Click the hero section.
-7. Click `Start stroke`.
-8. Try:
-
-```text
-headline: A live painted coffee bar
-```
-
-9. Try:
-
-```text
-add note: Give this hero more wet paint texture
-```
-
+4. Answer the design questions in plain language.
+5. Add a reference link, screenshot, or note if you have one.
+6. Click `Begin painting`.
+7. Watch the page paint in sections.
+8. Click the hero section.
+9. Click `Start stroke`.
 10. Try:
 
 ```text
-make this playful
+make this calmer and more premium
 ```
 
-11. Click `Codex apply` to stream real Codex progress and write generated files.
+11. Try:
+
+```text
+add a waitlist form here
+```
+
+12. Try:
+
+```text
+make this feel finished
+```
+
+13. Click `Download files` to hand the generated workspace to a code agent.
+14. Click `Codex apply` only when you want Codex CLI to write `src/generated` repo files.
 
 ## What The Buttons Do
 
@@ -116,6 +119,29 @@ make this playful
 `Command` also opens the command box.
 
 `Voice stroke` records audio and sends it to Groq, then places the transcription in the command box.
+
+`Begin painting` creates a workspace under:
+
+```text
+.palette/workspaces/<project-id>/
+```
+
+The generated folder contains both structured canvas data and a usable React component:
+
+```text
+generated/palette-project.json
+generated/PalettePage.tsx
+```
+
+By default, Palette uses Groq for the real build path when `GROQ_API_KEY` is set. To force a provider:
+
+```powershell
+$env:PALETTE_BUILD_PROVIDER="groq"   # default when GROQ_API_KEY exists
+$env:PALETTE_BUILD_PROVIDER="openai" # needs a valid OPENAI_API_KEY
+$env:PALETTE_BUILD_PROVIDER="codex"  # needs authenticated Codex CLI
+```
+
+The sidebar shows `Live painter` so a beginner can see which local engine Palette will use before pressing `Begin painting`.
 
 `Save folder` saves the current canvas under:
 
@@ -132,6 +158,19 @@ src/generated/PalettePage.tsx
 
 `Set paint` downloads a JSON export of the current canvas.
 
+`Download files` downloads a code-agent bundle after `Begin painting` succeeds. The bundle includes:
+
+```text
+PRODUCT.md
+DESIGN.md
+palette-brief.json
+generated/palette-project.json
+generated/PalettePage.tsx
+references/
+```
+
+Give that JSON bundle to Codex, Claude Code, Cursor, or another coding agent when you want the generated frontend connected to a real app.
+
 ## Useful Shortcuts
 
 ```text
@@ -143,6 +182,16 @@ Ctrl Z        Undo
 Ctrl Y        Redo
 ```
 
+## Smoke Test
+
+Run the full-stack smoke gate after backend or build-runner changes:
+
+```powershell
+npm run smoke:full-stack
+```
+
+It checks skill loading, the Impeccable interview, reference persistence, real build, steering, polish, and direct TypeScript compilation of the generated `PalettePage.tsx`.
+
 ## Environment Flags
 
 These flags are already included in `.env.example`:
@@ -151,14 +200,18 @@ These flags are already included in `.env.example`:
 VITE_PALETTE_INTENT_API=1
 VITE_PALETTE_CODEX_APPLY=1
 VITE_PALETTE_PROJECT_STORE=1
+VITE_PALETTE_HANDOFF_API=1
+VITE_PALETTE_WORKSPACE_STORE=1
 VITE_PALETTE_VOICE_API=1
 ```
+
+The shippable bridges are on by default. Set a matching Vite flag or localStorage value to `0` only when you deliberately want to force local-only behavior while debugging.
 
 If a feature button says the backend is offline, make sure `npm run api` is running.
 
 If voice does not transcribe, make sure `GROQ_API_KEY` is set.
 
-If remote steering falls back to local mode, make sure `OPENAI_API_KEY` or `CODEX_API_KEY` is set.
+If the live painter is not ready, open the `Live painter` card and check whether Groq, OpenAI, or Codex CLI is selected and authenticated.
 
 If Codex apply fails, make sure Codex Desktop or Codex CLI is installed and available on this machine.
 

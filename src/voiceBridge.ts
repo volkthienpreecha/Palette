@@ -8,7 +8,7 @@ export async function requestVoiceTranscription(audio: Blob): Promise<VoiceTrans
   if (!shouldUseVoiceBridge()) {
     return {
       source: "local",
-      status: "Enable the voice bridge to transcribe microphone strokes.",
+      status: "Voice is disabled for local-only mode.",
       text: "",
     };
   }
@@ -67,11 +67,11 @@ function friendlyError(error: unknown, fallback: string) {
 }
 
 function shouldUseVoiceBridge() {
-  if (import.meta.env.VITE_PALETTE_VOICE_API === "1") return true;
+  if (import.meta.env.VITE_PALETTE_VOICE_API === "0") return false;
 
   try {
-    return window.localStorage.getItem("palette:voice-api") === "1";
+    return window.localStorage.getItem("palette:voice-api") !== "0";
   } catch {
-    return false;
+    return true;
   }
 }

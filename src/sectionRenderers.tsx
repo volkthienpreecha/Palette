@@ -223,11 +223,11 @@ export function PaletteNavSection({
   helpers: PaletteSectionHelpers;
 }) {
   const links = section.links ?? [
-    { label: "Menu" },
-    { label: "Robots" },
-    { label: "Visit" },
+    { label: "Work" },
+    { label: "Details" },
+    { label: "Contact" },
   ];
-  const action = section.actions?.[0] ?? { label: "Reserve" };
+  const action = section.actions?.[0] ?? { label: "Start" };
 
   return (
     <nav className="demo-nav">
@@ -254,7 +254,7 @@ export function PaletteHeroSection({
   helpers: PaletteSectionHelpers;
 }) {
   const primary = section.actions?.[0] ?? { label: "Join waitlist" };
-  const secondary = section.actions?.[1]?.label ?? "First tasting opens at 7:30 AM";
+  const secondary = section.actions?.[1]?.label ?? "First look opens soon";
   const hasReferenceImage = Boolean(section.imageUrl);
 
   return (
@@ -273,17 +273,19 @@ export function PaletteHeroSection({
         ) : null}
         {section.hasWaitlist ? <PaletteInlineWaitlist section={section} helpers={helpers} /> : null}
       </div>
-      <div className={`coffee-study ${hasReferenceImage ? "has-reference-image" : ""}`} aria-hidden={!hasReferenceImage}>
+      <div className={`atelier-study ${hasReferenceImage ? "has-reference-image" : ""}`} aria-hidden={!hasReferenceImage}>
         {section.imageUrl ? (
-          <img className="coffee-reference-image" src={section.imageUrl} alt={section.imageAlt ?? ""} />
+          <img className="atelier-reference-image" src={section.imageUrl} alt={section.imageAlt ?? ""} />
         ) : (
           <>
-            <div className="robot-arm" />
-            <div className="cup">
+            <div className="painted-canvas-study" />
+            <div className="palette-dish">
+              <span />
+              <span />
               <span />
             </div>
-            <div className="steam steam-one" />
-            <div className="steam steam-two" />
+            <div className="brush-stroke brush-stroke-one" />
+            <div className="brush-stroke brush-stroke-two" />
           </>
         )}
       </div>
@@ -304,9 +306,10 @@ export function PaletteInlineWaitlist({
       onSubmit={(event) => {
         event.preventDefault();
         helpers.onSubmitForm?.(section, formValues(event.currentTarget));
+        event.currentTarget.reset();
       }}
     >
-      <label htmlFor={`${section.id}-waitlist-email`}>Reserve a tasting</label>
+      <label htmlFor={`${section.id}-waitlist-email`}>Join the list</label>
       <div>
         <input id={`${section.id}-waitlist-email`} name="email" type="email" placeholder="name@studio.com" />
         <button type="submit">Set</button>
@@ -317,9 +320,9 @@ export function PaletteInlineWaitlist({
 
 export function PaletteFeaturesSection({ section }: { section: PaletteSectionModel }) {
   const features = section.features ?? [
-    { title: "Measured pour", copy: "Robotic arms tune grind, heat, and timing for each order." },
-    { title: "Human calm", copy: "The room stays quiet, tactile, and easy to understand." },
-    { title: "Morning memory", copy: "Regular orders reappear before the line reaches the counter." },
+    { title: "Clear first stroke", copy: "The opening section explains the product without making users decode it." },
+    { title: "Human steering", copy: "Each area can be selected, revised, and polished without restarting." },
+    { title: "Agent-ready files", copy: "The generated folder is structured so a coding agent can keep building." },
   ];
 
   return (
@@ -340,9 +343,9 @@ export function PaletteFeaturesSection({ section }: { section: PaletteSectionMod
 
 export function PalettePricingSection({ section }: { section: PaletteSectionModel }) {
   const plans = section.plans ?? [
-    { name: "Morning", price: "$6", copy: "Single cup, timed pickup." },
-    { name: "Studio", price: "$18", copy: "Three cups across a work block.", featured: true },
-    { name: "Foundry", price: "$42", copy: "Team tasting tray and notes." },
+    { name: "Sketch", price: "1 screen", copy: "A first pass with editable sections." },
+    { name: "Study", price: "Full page", copy: "A complete landing page with notes and references.", featured: true },
+    { name: "Ship", price: "Code handoff", copy: "Generated files ready for your coding agent." },
   ];
 
   return (
@@ -495,6 +498,7 @@ export function PaletteFormSection({
         onSubmit={(event) => {
           event.preventDefault();
           helpers.onSubmitForm?.(section, formValues(event.currentTarget));
+          event.currentTarget.reset();
         }}
       >
         {fields.map((field) => (
@@ -516,9 +520,9 @@ export function PaletteFormSection({
 
 export function PaletteGallerySection({ section }: { section: PaletteSectionModel }) {
   const gallery = section.gallery ?? [
-    { title: "Morning bar", copy: "A calm counter with precise service." },
-    { title: "Robot pour", copy: "Mechanical movement made visible and warm." },
-    { title: "Studio table", copy: "A place for tasting notes and quiet work." },
+    { title: "First wash", copy: "A broad visual direction before details are set." },
+    { title: "Selected surface", copy: "A single section ready for direct steering." },
+    { title: "Finished pass", copy: "A polished canvas with files ready to hand off." },
   ];
 
   return (
