@@ -118,6 +118,29 @@ function isHeroFormAction(label: string) {
   return formIntentPattern.test(label);
 }
 
+function mergeStreamProject(current: PaletteProject | null, incoming: PaletteProject): PaletteProject {
+  if (!current || incoming.sections.length >= current.sections.length) return incoming;
+
+  const merged = [...current.sections];
+  for (const incomingSection of incoming.sections) {
+    let index = merged.findIndex((section) => section.id === incomingSection.id);
+    if (index < 0) index = merged.findIndex((section) => section.kind === incomingSection.kind);
+    if (index >= 0) {
+      merged[index] = incomingSection;
+    } else {
+      merged.push(incomingSection);
+    }
+  }
+
+  return {
+    ...incoming,
+    sections: merged,
+    swatches: incoming.swatches.length > 0 ? incoming.swatches : current.swatches,
+    brushLog: incoming.brushLog.length > 0 ? incoming.brushLog : current.brushLog,
+    paintPlan: incoming.paintPlan ?? current.paintPlan,
+  };
+}
+
 function App() {
   const [initialWorkspace] = useState(() => loadWorkspaceState(createBlankProject()));
   const [project, setProject] = useState<PaletteProject>(() => initialWorkspace.project);
@@ -158,6 +181,7 @@ function App() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const buildAbortRef = useRef<AbortController | null>(null);
+  const resumeAfterSteerRef = useRef(false);
   const liveTranscriptRef = useRef("");
   const liveTranscriptionTimerRef = useRef<number | null>(null);
   const liveTranscriptionInFlightRef = useRef(false);
@@ -372,8 +396,11 @@ function App() {
 
   const openCommandCapsule = useCallback((nextDraft?: string) => {
     if (phase === "building" || phase === "painting") {
+      resumeAfterSteerRef.current = true;
       buildAbortRef.current?.abort();
       buildAbortRef.current = null;
+      setApplying(false);
+      setSelectedId((current) => current ?? projectRef.current?.sections.at(-1)?.id ?? null);
       setPhase("paused");
       setStatus("Brush lifted mid-stroke. Steer the canvas before it keeps painting.");
     }
@@ -386,6 +413,11 @@ function App() {
 
     setCapsuleOpen(true);
   }, [phase]);
+
+  const closeCommandCapsule = useCallback(() => {
+    resumeAfterSteerRef.current = false;
+    setCapsuleOpen(false);
+  }, []);
 
   const applyOneOperation = useCallback((operation: PaletteOperation) => {
     let exportText: string | undefined;
@@ -426,8 +458,11 @@ function App() {
       setBuildProjectId(event.projectId || null);
       setPaintQueue([]);
       setPhase("painting");
-      setProject(event.project);
-      projectRef.current = event.project;
+      setProject((current) => {
+        const next = mergeStreamProject(projectRef.current ?? current, event.project!);
+        projectRef.current = next;
+        return next;
+      });
     }
     if (event.label) {
       setStatus(event.type === "output" ? event.label : event.detail ? `${event.label}. ${event.detail}` : event.label);
@@ -453,6 +488,7 @@ function App() {
 
   const beginWorkspaceBuild = useCallback(
     async (nextBrief = brief) => {
+      resumeAfterSteerRef.current = false;
       setApplying(true);
       setCapsuleOpen(false);
       setPhase("building");
@@ -484,7 +520,11 @@ function App() {
           controller.signal,
         );
 
-      if (!result.applied || result.project.sections.length === 0) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (!result.applied || result.project.sections.length === 0) {
           if (projectRef.current?.sections.length === 0) {
             setProject(originalProject);
             projectRef.current = originalProject;
@@ -503,7 +543,7 @@ function App() {
         setStatus(result.status);
       } finally {
         if (buildAbortRef.current === controller) buildAbortRef.current = null;
-        setApplying(false);
+        if (!controller.signal.aborted) setApplying(false);
       }
     },
     [brief, ensureContext, recordBuildEvent, submissions, workspaceNotes],
@@ -549,16 +589,23 @@ function App() {
       const command = raw.trim();
       const baseProject = projectRef.current!;
       const contextProject = withWorkspaceContext(projectForBuildContext(baseProject, paintQueue), workspaceNotes, submissions);
-      if (!command && baseProject.sections.length === 0) {
+      if (!command) {
         setStatus("No brushstroke given.");
         return;
       }
 
-      if (selectedSection?.kind === "hero" && isInlineFormStroke(command)) {
+      const selectedMatch = selectedId
+        ? baseProject.sections.find((section) => section.id === selectedId) ?? null
+        : null;
+      const targetSection = selectedMatch ?? baseProject.sections.at(-1) ?? null;
+      const targetId = targetSection?.id ?? null;
+
+      if (targetSection?.kind === "hero" && isInlineFormStroke(command)) {
         setCapsuleOpen(false);
         setListening(false);
-        applyOneOperation({ type: "add_waitlist", id: selectedSection.id });
-        setSelectedId(selectedSection.id);
+        resumeAfterSteerRef.current = false;
+        applyOneOperation({ type: "add_waitlist", id: targetSection.id });
+        setSelectedId(targetSection.id);
         setStatus("Painted a form into the selected hero.");
         return;
       }
@@ -588,6 +635,7 @@ function App() {
           setInterviewQuestion(result);
           setInterviewAnswer("");
           setCapsuleOpen(false);
+          resumeAfterSteerRef.current = false;
           setPhase(result.complete ? "references" : "interview");
           setStatus(result.status || "Palette is shaping the first brief.");
           return;
@@ -602,12 +650,13 @@ function App() {
           {
             projectId: context.projectId,
             command,
-            selectedId,
-            selectedSection,
+            selectedId: targetId,
+            selectedSection: targetSection,
             brief: context.brief,
             references: context.references,
             notes: context.notes,
             project: contextProject,
+            continueAfterPatch: resumeAfterSteerRef.current,
           },
           recordBuildEvent,
         );
@@ -620,10 +669,11 @@ function App() {
         setBuildProjectId(result.projectId || context.projectId);
         setProject(result.project);
         projectRef.current = result.project;
-        setSelectedId(selectedId && result.project.sections.some((section) => section.id === selectedId) ? selectedId : null);
+        setSelectedId(targetId && result.project.sections.some((section) => section.id === targetId) ? targetId : null);
         setPhase("done");
         setStatus(result.status);
       } finally {
+        resumeAfterSteerRef.current = false;
         setApplying(false);
       }
     },
@@ -745,8 +795,10 @@ function App() {
 
   const interruptPainting = useCallback(() => {
     if (phase !== "painting" && phase !== "building") return;
+    resumeAfterSteerRef.current = true;
     buildAbortRef.current?.abort();
     buildAbortRef.current = null;
+    setSelectedId((current) => current ?? projectRef.current?.sections.at(-1)?.id ?? null);
     setPhase("paused");
     setCapsuleOpen(true);
     setDraft("");
@@ -1043,19 +1095,23 @@ function App() {
 
       if ((event.metaKey || event.ctrlKey) && key === "k") {
         event.preventDefault();
+        if (capsuleOpen) {
+          if (!applying) void applyDirection(draft);
+          return;
+        }
         openCommandCapsule();
-        return;
-      }
-
-      if ((event.metaKey || event.ctrlKey) && key === "z") {
-        event.preventDefault();
-        undo();
         return;
       }
 
       if ((event.metaKey || event.ctrlKey) && (key === "y" || (event.shiftKey && key === "z"))) {
         event.preventDefault();
         redo();
+        return;
+      }
+
+      if ((event.metaKey || event.ctrlKey) && key === "z") {
+        event.preventDefault();
+        undo();
         return;
       }
 
@@ -1068,7 +1124,7 @@ function App() {
           event.preventDefault();
           interruptPainting();
         } else if (capsuleOpen) {
-          setCapsuleOpen(false);
+          closeCommandCapsule();
         }
         return;
       }
@@ -1091,6 +1147,10 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     capsuleOpen,
+    applying,
+    applyDirection,
+    closeCommandCapsule,
+    draft,
     interruptPainting,
     openCommandCapsule,
     phase,
@@ -1377,7 +1437,7 @@ function App() {
         selectedSection={selectedSection}
         onOpen={() => openCommandCapsule()}
         onDraft={setDraft}
-        onClose={() => setCapsuleOpen(false)}
+        onClose={closeCommandCapsule}
         onSubmit={(value) => applyDirection(value ?? draft)}
         onInterrupt={interruptPainting}
         onListen={toggleVoiceInput}

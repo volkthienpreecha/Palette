@@ -105,6 +105,7 @@ export type BuildPayload = {
   references?: PaletteSwatch[];
   notes?: BuildNote[];
   project?: PaletteProject;
+  continueAfterPatch?: boolean;
 };
 
 export function notesForBuild(notes: PalettePinnedNote[]): BuildNote[] {

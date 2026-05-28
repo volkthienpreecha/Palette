@@ -154,9 +154,11 @@ async function runWorkspaceCodex({ mode, payload, designWorkspace, emit, env, op
     return resultPayload({ mode, designWorkspace, project, source: "dry-run", summary: "Dry run generated Palette files." });
   }
 
-  const allowedFiles = generatedFiles(designWorkspace);
-  const boundaryBefore = await boundarySnapshot(workspaceRoot(env), designWorkspace.relative, allowedFiles);
   const provider = selectBuildProvider(env);
+  const allowedFiles = generatedFiles(designWorkspace);
+  const boundaryBefore = provider === "codex"
+    ? await boundarySnapshot(workspaceRoot(env), designWorkspace.relative, allowedFiles)
+    : null;
 
   if (provider === "codex") {
     await runCodex({
@@ -184,7 +186,9 @@ async function runWorkspaceCodex({ mode, payload, designWorkspace, emit, env, op
 
   emitProgress(emit, "phase", "Checking the details", "Palette is validating the generated project file.");
   await verifyGeneratedFiles(workspaceRoot(env), allowedFiles);
-  await verifyBoundarySnapshot(workspaceRoot(env), designWorkspace.relative, allowedFiles, boundaryBefore);
+  if (provider === "codex") {
+    await verifyBoundarySnapshot(workspaceRoot(env), designWorkspace.relative, allowedFiles, boundaryBefore);
+  }
   const project = await readGeneratedProject(designWorkspace);
   emitProgress(emit, "result", "Ready to steer", "The generated canvas is live.");
   return resultPayload({
@@ -217,10 +221,10 @@ async function runModelBuild({ mode, provider, payload, designWorkspace, skillSt
 async function runFocusedSectionModelBuild({ mode, provider, payload, designWorkspace, skillStack, env, emit, options = {} }) {
   const currentProject = normalizeFrontendProject(payload.currentProject);
   const selectedId = cleanId(payload.selectedId || payload.selectedSection?.id);
-  const selectedIndex = Math.max(
-    0,
-    currentProject.sections.findIndex((section) => section.id === selectedId),
-  );
+  const selectedIndex = currentProject.sections.findIndex((section) => section.id === selectedId);
+  if (selectedIndex < 0) {
+    throw httpError(400, "Selected section was not found. Select the area again before steering.");
+  }
   const originalSection = currentProject.sections[selectedIndex] || payload.selectedSection;
   const plannedSection = {
     id: originalSection.id,
@@ -258,6 +262,7 @@ async function runFocusedSectionModelBuild({ mode, provider, payload, designWork
   currentProject.sections = currentProject.sections.map((section, index) =>
     index === selectedIndex ? nextSection : section,
   );
+  currentProject.paintPlan = updatePaintPlanStatus(currentProject.paintPlan, nextSection, "patched");
   currentProject.brushLog = [
     ...(currentProject.brushLog || []),
     {
@@ -276,6 +281,19 @@ async function runFocusedSectionModelBuild({ mode, provider, payload, designWork
     project: currentProject,
     designWorkspace,
   });
+
+  if (mode === "patch" && payload.continueAfterPatch) {
+    await continueRemainingSectionsAfterPatch({
+      provider,
+      payload,
+      designWorkspace,
+      skillStack,
+      env,
+      emit,
+      options,
+      project: currentProject,
+    });
+  }
 }
 
 async function runProgressiveModelBuild({ provider, payload, designWorkspace, skillStack, env, emit, options = {} }) {
@@ -300,6 +318,7 @@ async function runProgressiveModelBuild({ provider, payload, designWorkspace, sk
     theme: plan.theme,
     swatches: payload.references || [],
     sections: [],
+    paintPlan: createPaintPlan(plan, env.PALETTE_AI_SECTION_PLAN === "1" ? "ai" : "default"),
     brushLog: [
       { id: "log-plan", label: "Plan mixed", detail: `${providerDisplayName(provider)} planned ${plan.sections.length} sections before painting.` },
     ],
@@ -308,6 +327,19 @@ async function runProgressiveModelBuild({ provider, payload, designWorkspace, sk
   };
 
   await writeGeneratedFiles(designWorkspace, project);
+  const sectionTasks = plan.sections.map((plannedSection, index) =>
+    captureSectionTask(requestGeneratedSection({
+      provider,
+      payload,
+      skillStack,
+      env,
+      plan,
+      plannedSection,
+      project: projectContextForPlannedSection(project, plan, index),
+      index,
+      signal: options.signal,
+    })),
+  );
 
   for (let index = 0; index < plan.sections.length; index += 1) {
     throwIfAborted(options.signal);
@@ -318,20 +350,12 @@ async function runProgressiveModelBuild({ provider, payload, designWorkspace, sk
       sectionPaintLabel(plannedSection, index),
       plannedSection.purpose || "A focused section is being generated as real TSX and CSS.",
     );
+    project.paintPlan = updatePaintPlanStatus(project.paintPlan, plannedSection, "painting");
 
-    const generated = await requestGeneratedSection({
-      provider,
-      payload,
-      skillStack,
-      env,
-      plan,
-      plannedSection,
-      project,
-      index,
-      signal: options.signal,
-    });
+    const generated = await unwrapSectionTask(sectionTasks[index]);
     const section = normalizeGeneratedSection(generated, plannedSection, payload, index);
     project.sections.push(section);
+    project.paintPlan = updatePaintPlanStatus(project.paintPlan, plannedSection, "painted");
     project.brushLog.push({
       id: `log-${section.id}`,
       label: `${section.kind} painted`,
@@ -347,6 +371,72 @@ async function runProgressiveModelBuild({ provider, payload, designWorkspace, sk
       designWorkspace,
     });
   }
+}
+
+async function continueRemainingSectionsAfterPatch({ provider, payload, designWorkspace, skillStack, env, emit, options, project }) {
+  const plan = planFromProjectPaintPlan(project, payload, env);
+  const missing = missingPlannedSections(project.sections || [], plan.sections);
+  if (missing.length === 0) return;
+
+  const sectionTasks = missing.map((plannedSection, index) => {
+    const plannedIndex = plan.sections.findIndex((section) => section.id === plannedSection.id);
+    return captureSectionTask(requestGeneratedSection({
+      provider,
+      payload,
+      skillStack,
+      env,
+      plan,
+      plannedSection,
+      project: projectContextForPlannedSection(project, plan, Math.max(plannedIndex, index)),
+      index: Math.max(plannedIndex, project.sections.length + index),
+      signal: options.signal,
+    }));
+  });
+
+  for (let index = 0; index < missing.length; index += 1) {
+    throwIfAborted(options.signal);
+    const plannedSection = missing[index];
+    const plannedIndex = plan.sections.findIndex((section) => section.id === plannedSection.id);
+    emitProgress(
+      emit,
+      "phase",
+      sectionPaintLabel(plannedSection, Math.max(plannedIndex, index)),
+      plannedSection.purpose || "Palette is continuing the canvas after your steering note.",
+    );
+    project.paintPlan = updatePaintPlanStatus(project.paintPlan, plannedSection, "painting");
+    const generated = await unwrapSectionTask(sectionTasks[index]);
+    const section = normalizeGeneratedSection(generated, plannedSection, payload, Math.max(plannedIndex, project.sections.length));
+    project.sections.push(section);
+    project.sections = orderSectionsByPlan(project.sections, plan.sections);
+    project.paintPlan = updatePaintPlanStatus(project.paintPlan, plannedSection, "painted");
+    project.brushLog.push({
+      id: `log-${section.id}`,
+      label: `${section.kind} painted`,
+      detail: `Generated ${section.generated?.componentName || section.title} as a section artifact after steering.`,
+    });
+    await writeGeneratedFiles(designWorkspace, project);
+    emitSection(emit, {
+      label: sectionStatusLabel(section, Math.max(plannedIndex, index)),
+      detail: "Painting continued after your steering note.",
+      index: Math.max(plannedIndex, index),
+      section,
+      project,
+      designWorkspace,
+    });
+  }
+}
+
+function captureSectionTask(task) {
+  return task.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+}
+
+async function unwrapSectionTask(task) {
+  const result = await task;
+  if (result.error) throw result.error;
+  return result.value;
 }
 
 async function requestGeneratedSection({ provider, payload, skillStack, env, plan, plannedSection, project, index, signal }) {
@@ -475,8 +565,8 @@ function modelRequestBody(provider, messages, mode, env) {
     return JSON.stringify({
       model: providerModel(provider, env),
       max_tokens: positiveInteger(
-        env.CLAUDE_MAX_TOKENS,
-        mode === "section" ? 4500 : mode === "plan" ? 2200 : 7000,
+        mode === "section" ? env.CLAUDE_SECTION_MAX_TOKENS || env.CLAUDE_MAX_TOKENS : env.CLAUDE_MAX_TOKENS,
+        mode === "section" ? 3400 : mode === "plan" ? 2200 : 7000,
       ),
       temperature,
       system,
@@ -694,7 +784,7 @@ function buildSectionMessages({ payload, skillStack, plan, plannedSection, proje
     "Generate exactly one section as real frontend artifacts, not a template selection.",
     "The visible preview must come from generated.html and generated.css. The export must include generated.tsx.",
     "Use semantic HTML, bespoke layout, and section-specific CSS. Avoid generic cards unless the content truly needs cards.",
-    "Keep the section compact: CSS under 180 lines, HTML under 80 lines, TSX under 120 lines.",
+    "Keep the section compact: CSS under 120 lines, HTML under 60 lines, TSX under 90 lines.",
     "Do not use @import, remote font CSS, CSS comments, or long decorative SVG illustrations.",
     "Never use placeholder text such as nav section, stats section, lorem ipsum, or section title.",
     "Do not include script tags, external dependencies, imports, secrets, terminal instructions, or emojis.",
@@ -748,7 +838,7 @@ function buildSectionPatchMessages({ mode, payload, skillStack, plannedSection, 
     "Regenerate exactly one selected section as real frontend artifacts.",
     "The visible preview must come from generated.html and generated.css. The export must include generated.tsx.",
     "Do not return the whole project. Do not modify unrelated sections.",
-    "Keep the section compact: CSS under 180 lines, HTML under 80 lines, TSX under 120 lines.",
+    "Keep the section compact: CSS under 120 lines, HTML under 60 lines, TSX under 90 lines.",
     "Do not use @import, remote font CSS, CSS comments, long decorative SVG illustrations, placeholders, or emojis.",
     "The TSX must export a named React component with no imports and no external libraries.",
     "Preserve the selected section's purpose unless the user explicitly asks to change it.",
@@ -954,6 +1044,139 @@ function defaultSectionPlan(payload, env) {
   };
 }
 
+function createPaintPlan(plan, source) {
+  return normalizePaintPlan({
+    id: `paint-plan-${Date.now()}`,
+    source,
+    sections: (plan.sections || []).map((section, index) => ({
+      ...section,
+      index,
+      status: "pending",
+    })),
+    cursor: 0,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function planFromProjectPaintPlan(project, payload, env) {
+  const paintPlan = normalizePaintPlan(project.paintPlan);
+  if (!paintPlan?.sections?.length) return defaultSectionPlan(payload, env);
+  return {
+    name: cleanText(project.name || payload.brief?.product || payload.command || "Generated canvas", 90) || "Generated canvas",
+    theme: project.theme === "premium" ? "premium" : "atelier",
+    sections: paintPlan.sections.map((section) => ({
+      id: section.id,
+      kind: section.kind,
+      title: section.title,
+      purpose: section.purpose,
+    })),
+  };
+}
+
+function normalizePaintPlan(paintPlan) {
+  if (!paintPlan || typeof paintPlan !== "object" || !Array.isArray(paintPlan.sections)) return null;
+  const statuses = new Set(["pending", "painting", "painted", "patched"]);
+  const sections = paintPlan.sections
+    .map((section, index) => {
+      const kind = sectionKinds.has(section?.kind) ? section.kind : "";
+      if (!kind) return null;
+      const status = statuses.has(section.status) ? section.status : "pending";
+      return {
+        id: cleanId(section.id) || `section-${kind}-${index + 1}`,
+        kind,
+        title: cleanSectionTitle(section.title, kind),
+        purpose: cleanText(section.purpose || section.subtitle || section.goal, 260),
+        index: Number.isFinite(section.index) ? section.index : index,
+        status,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.index - b.index)
+    .slice(0, 24)
+    .map((section, index) => ({ ...section, index }));
+
+  if (sections.length === 0) return null;
+  const done = new Set(["painted", "patched"]);
+  const cursor = sections.findIndex((section) => !done.has(section.status));
+
+  return {
+    id: cleanId(paintPlan.id) || `paint-plan-${Date.now()}`,
+    source: cleanText(paintPlan.source, 40) || "model",
+    sections,
+    cursor: cursor < 0 ? sections.length : cursor,
+    updatedAt: cleanText(paintPlan.updatedAt, 40) || new Date().toISOString(),
+  };
+}
+
+function updatePaintPlanStatus(paintPlan, sectionRef, status) {
+  const normalized = normalizePaintPlan(paintPlan);
+  if (!normalized) return paintPlan || null;
+  const id = cleanId(sectionRef?.id);
+  const kind = sectionKinds.has(sectionRef?.kind) ? sectionRef.kind : "";
+  let matched = false;
+  const sections = normalized.sections.map((section) => {
+    const isMatch = id ? section.id === id : !matched && kind && section.kind === kind;
+    if (!isMatch) return section;
+    matched = true;
+    return { ...section, status };
+  });
+  const done = new Set(["painted", "patched"]);
+  const cursor = sections.findIndex((section) => !done.has(section.status));
+  return {
+    ...normalized,
+    sections,
+    cursor: cursor < 0 ? sections.length : cursor,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function missingPlannedSections(sections, plannedSections) {
+  const remaining = [...sections];
+  const missing = [];
+  for (const planned of plannedSections) {
+    let matchIndex = remaining.findIndex((section) => section.id === planned.id);
+    if (matchIndex < 0) {
+      matchIndex = remaining.findIndex((section) => section.kind === planned.kind);
+    }
+    if (matchIndex >= 0) {
+      remaining.splice(matchIndex, 1);
+    } else {
+      missing.push(planned);
+    }
+  }
+  return missing;
+}
+
+function projectContextForPlannedSection(project, plan, index) {
+  const previousPlannedSections = plan.sections.slice(0, index).map((section) => ({
+    id: section.id,
+    kind: section.kind,
+    title: section.title,
+    subtitle: section.purpose,
+  }));
+  const existingById = new Map((project.sections || []).map((section) => [section.id, section]));
+  const existingByKind = new Map((project.sections || []).map((section) => [section.kind, section]));
+  return {
+    ...project,
+    sections: previousPlannedSections.map((section) => existingById.get(section.id) || existingByKind.get(section.kind) || section),
+  };
+}
+
+function orderSectionsByPlan(sections, plannedSections) {
+  const remaining = [...sections];
+  const ordered = [];
+  for (const planned of plannedSections) {
+    let matchIndex = remaining.findIndex((section) => section.id === planned.id);
+    if (matchIndex < 0) {
+      matchIndex = remaining.findIndex((section) => section.kind === planned.kind);
+    }
+    if (matchIndex < 0) continue;
+    ordered.push(remaining[matchIndex]);
+    remaining.splice(matchIndex, 1);
+  }
+  return [...ordered, ...remaining];
+}
+
 function normalizePlannedSection(section, index) {
   const kind = sectionKinds.has(section?.kind) ? section.kind : "";
   if (!kind) return null;
@@ -978,7 +1201,7 @@ function dedupePlannedSections(sections) {
 
 function normalizeGeneratedSection(generated, plannedSection, payload, index) {
   const rawSection = generated?.section && typeof generated.section === "object" ? generated.section : generated;
-  const kind = sectionKinds.has(rawSection?.kind) ? rawSection.kind : plannedSection.kind;
+  const kind = plannedSection.kind;
   const section = normalizeFrontendProject({
     id: payload.projectId || `palette-${Date.now()}`,
     name: payload.brief?.product || "Palette project",
@@ -986,7 +1209,7 @@ function normalizeGeneratedSection(generated, plannedSection, payload, index) {
     sections: [
       {
         ...rawSection,
-        id: cleanId(rawSection?.id) || plannedSection.id,
+        id: plannedSection.id,
         kind,
         title: cleanSectionTitle(rawSection?.title || plannedSection.title, kind),
       },
@@ -1240,6 +1463,7 @@ function buildRequestPayload(mode, payload) {
     references: Array.isArray(payload.references) ? payload.references : [],
     notes: Array.isArray(payload.notes) ? payload.notes : [],
     currentProject: payload.project || null,
+    continueAfterPatch: payload.continueAfterPatch === true,
     createdAt: new Date().toISOString(),
   };
 }
@@ -1690,6 +1914,7 @@ export default PalettePage;
 
 function normalizeFrontendProject(project) {
   const normalized = normalizeProject(project);
+  const paintPlan = normalizePaintPlan(project.paintPlan);
   return {
     id: normalized.id,
     name: normalized.name,
@@ -1701,6 +1926,7 @@ function normalizeFrontendProject(project) {
     brushLog: Array.isArray(project.brushLog) && project.brushLog.length > 0
       ? project.brushLog.slice(0, 40)
       : [{ id: `log-${Date.now()}`, label: "Canvas painted", detail: "Codex wrote the generated workspace files." }],
+    ...(paintPlan ? { paintPlan } : {}),
     past: [],
     future: [],
   };

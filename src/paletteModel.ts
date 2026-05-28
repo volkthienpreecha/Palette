@@ -21,6 +21,23 @@ export type BrushLogEntry = {
   detail: string;
 };
 
+export type PalettePaintPlanSection = {
+  id: string;
+  kind: PaletteSectionKind;
+  title: string;
+  purpose?: string;
+  index: number;
+  status?: "pending" | "painting" | "painted" | "patched";
+};
+
+export type PalettePaintPlan = {
+  id: string;
+  source?: string;
+  sections: PalettePaintPlanSection[];
+  cursor?: number;
+  updatedAt?: string;
+};
+
 export type PaletteProject = {
   id: string;
   name: string;
@@ -30,6 +47,7 @@ export type PaletteProject = {
   sections: PaletteSectionModel[];
   swatches: PaletteSwatch[];
   brushLog: BrushLogEntry[];
+  paintPlan?: PalettePaintPlan;
   past: PaletteSnapshot[];
   future: PaletteSnapshot[];
   exportText?: string;
@@ -42,6 +60,7 @@ export type PaletteSnapshot = {
   sections: PaletteSectionModel[];
   swatches: PaletteSwatch[];
   brushLog: BrushLogEntry[];
+  paintPlan?: PalettePaintPlan;
 };
 
 export type CommandContext = {
@@ -393,6 +412,7 @@ export function undoProject(project: PaletteProject): OperationResult {
       swatchColors: previous.swatchColors,
       sections: previous.sections,
       swatches: previous.swatches,
+      paintPlan: previous.paintPlan,
       brushLog: [...previous.brushLog, logEntry("Undo", "Returned to the previous brushstroke.")],
       past: project.past.slice(0, -1),
       future: [current, ...project.future],
@@ -413,6 +433,7 @@ export function redoProject(project: PaletteProject): OperationResult {
       swatchColors: nextSnapshot.swatchColors,
       sections: nextSnapshot.sections,
       swatches: nextSnapshot.swatches,
+      paintPlan: nextSnapshot.paintPlan,
       brushLog: [...nextSnapshot.brushLog, logEntry("Redo", "Replayed the next brushstroke.")],
       past: [...project.past, current],
       future: project.future.slice(1),
@@ -1351,6 +1372,7 @@ function takeSnapshot(project: PaletteProject): PaletteSnapshot {
     sections: clone(project.sections),
     swatches: clone(project.swatches),
     brushLog: clone(project.brushLog),
+    paintPlan: project.paintPlan ? clone(project.paintPlan) : undefined,
   };
 }
 
@@ -1362,6 +1384,7 @@ function cloneProject(project: PaletteProject): PaletteProject {
     brushLog: clone(project.brushLog),
     past: [...project.past],
     future: [...project.future],
+    paintPlan: project.paintPlan ? clone(project.paintPlan) : undefined,
   };
 }
 
