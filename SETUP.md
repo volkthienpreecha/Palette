@@ -13,9 +13,10 @@ Install these first:
 
 - Node.js 20 or newer.
 - npm, which comes with Node.
-- A Groq API key if you want real AI painting now and voice transcription.
-- Codex Desktop or Codex CLI if you want to force the Codex build provider or use the `Codex apply` button.
-- An OpenAI API key if you want OpenAI/Codex-provider builds. Without a valid OpenAI key, Palette can still build through Groq.
+- Codex Desktop or Codex CLI if you want Codex to generate frontends or use the `Codex apply` button.
+- A Claude API key if you want Claude to generate frontends.
+- An OpenAI API key if you want an OpenAI builder model to generate frontends.
+- A Groq API key if you want voice transcription. Groq is not the default frontend builder.
 
 ## First Setup
 
@@ -42,7 +43,9 @@ Open `.env` and fill in the keys you have:
 ```env
 OPENAI_API_KEY=
 CODEX_API_KEY=
+ANTHROPIC_API_KEY=
 GROQ_API_KEY=
+PALETTE_BUILD_PROVIDER=claude
 ```
 
 Keep `.env` private. It is already ignored by git.
@@ -133,12 +136,18 @@ generated/palette-project.json
 generated/PalettePage.tsx
 ```
 
-By default, Palette uses Groq for the real build path when `GROQ_API_KEY` is set. To force a provider:
+By default, Palette uses Claude when `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY` is set. Groq is reserved for voice transcription. To force a frontend builder:
 
 ```powershell
-$env:PALETTE_BUILD_PROVIDER="groq"   # default when GROQ_API_KEY exists
-$env:PALETTE_BUILD_PROVIDER="openai" # needs a valid OPENAI_API_KEY
-$env:PALETTE_BUILD_PROVIDER="codex"  # needs authenticated Codex CLI
+$env:PALETTE_BUILD_PROVIDER="codex"  # needs authenticated Codex CLI or Desktop
+$env:PALETTE_BUILD_PROVIDER="claude" # needs ANTHROPIC_API_KEY or CLAUDE_API_KEY
+$env:PALETTE_BUILD_PROVIDER="openai" # needs OPENAI_API_KEY or CODEX_API_KEY
+```
+
+Palette does not pass `OPENAI_API_KEY` or `CODEX_API_KEY` into the Codex CLI by default, so a bad key in `.env` will not override your local Codex Desktop login. If you intentionally want the Codex CLI child process to use an API key, set:
+
+```powershell
+$env:PALETTE_CODEX_USE_API_KEY="1"
 ```
 
 The sidebar shows `Live painter` so a beginner can see which local engine Palette will use before pressing `Begin painting`.
@@ -190,7 +199,14 @@ Run the full-stack smoke gate after backend or build-runner changes:
 npm run smoke:full-stack
 ```
 
-It checks skill loading, the Impeccable interview, reference persistence, real build, steering, polish, and direct TypeScript compilation of the generated `PalettePage.tsx`.
+By default this uses a dry-run build so the test is repeatable without spending model tokens. To test the live builder path, run it with:
+
+```powershell
+$env:PALETTE_SMOKE_LIVE_BUILD="1"
+npm run smoke:full-stack
+```
+
+It checks skill loading, the Impeccable interview, reference persistence, build, steering, polish, export bundle creation, and direct TypeScript compilation of the generated `PalettePage.tsx`.
 
 ## Environment Flags
 
@@ -211,7 +227,7 @@ If a feature button says the backend is offline, make sure `npm run api` is runn
 
 If voice does not transcribe, make sure `GROQ_API_KEY` is set.
 
-If the live painter is not ready, open the `Live painter` card and check whether Groq, OpenAI, or Codex CLI is selected and authenticated.
+If the live painter is not ready, open the `Live painter` card and check whether Codex, Claude, or OpenAI is selected and authenticated.
 
 If Codex apply fails, make sure Codex Desktop or Codex CLI is installed and available on this machine.
 

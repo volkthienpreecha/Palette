@@ -498,8 +498,13 @@ async function sendWorkspaceBuildStream(req, res, payload, runner) {
     res.write(`${JSON.stringify(event)}\n`);
   };
 
+  const controller = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) controller.abort();
+  });
+
   try {
-    const result = await runner(payload, write);
+    const result = await runner(payload, write, process.env, { signal: controller.signal });
     write({ type: "result", label: result.status, result });
   } catch (error) {
     write({

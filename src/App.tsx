@@ -157,6 +157,7 @@ function App() {
   const projectRef = useRef<PaletteProject | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const buildAbortRef = useRef<AbortController | null>(null);
   const liveTranscriptRef = useRef("");
   const liveTranscriptionTimerRef = useRef<number | null>(null);
   const liveTranscriptionInFlightRef = useRef(false);
@@ -370,7 +371,9 @@ function App() {
   }, []);
 
   const openCommandCapsule = useCallback((nextDraft?: string) => {
-    if (phase === "painting") {
+    if (phase === "building" || phase === "painting") {
+      buildAbortRef.current?.abort();
+      buildAbortRef.current = null;
       setPhase("paused");
       setStatus("Brush lifted mid-stroke. Steer the canvas before it keeps painting.");
     }
@@ -419,6 +422,13 @@ function App() {
 
   const recordBuildEvent = useCallback((event: PaletteBuildEvent) => {
     setCodexEvents((current) => (event.type === "output" ? current : [...current, event].slice(-10)));
+    if (event.type === "section" && event.project) {
+      setBuildProjectId(event.projectId || null);
+      setPaintQueue([]);
+      setPhase("painting");
+      setProject(event.project);
+      projectRef.current = event.project;
+    }
     if (event.label) {
       setStatus(event.type === "output" ? event.label : event.detail ? `${event.label}. ${event.detail}` : event.label);
     }
@@ -456,6 +466,8 @@ function App() {
         return next;
       });
       setCodexEvents([{ type: "phase", label: "Preparing the canvas", detail: "Palette is saving the design brief." }]);
+      const controller = new AbortController();
+      buildAbortRef.current = controller;
 
       try {
         const context = await ensureContext(nextBrief);
@@ -469,24 +481,28 @@ function App() {
             project: withWorkspaceContext(projectRef.current!, workspaceNotes, submissions),
           },
           recordBuildEvent,
+          controller.signal,
         );
 
       if (!result.applied || result.project.sections.length === 0) {
-          setProject(originalProject);
-          projectRef.current = originalProject;
+          if (projectRef.current?.sections.length === 0) {
+            setProject(originalProject);
+            projectRef.current = originalProject;
+          }
           setPhase("references");
           setStatus(result.status);
           return;
         }
 
-        const nextProject = { ...result.project, sections: [], swatches: result.project.swatches || context.references };
+        const nextProject = { ...result.project, swatches: result.project.swatches || context.references };
         setBuildProjectId(result.projectId || context.projectId);
         setProject(nextProject);
         projectRef.current = nextProject;
-        setPaintQueue(result.project.sections);
-        setPhase("painting");
+        setPaintQueue([]);
+        setPhase("done");
         setStatus(result.status);
       } finally {
+        if (buildAbortRef.current === controller) buildAbortRef.current = null;
         setApplying(false);
       }
     },
@@ -728,10 +744,13 @@ function App() {
   }, [brief, ensureContext, recordBuildEvent, selectedId, selectedSection, submissions, workspaceNotes]);
 
   const interruptPainting = useCallback(() => {
-    if (phase !== "painting") return;
+    if (phase !== "painting" && phase !== "building") return;
+    buildAbortRef.current?.abort();
+    buildAbortRef.current = null;
     setPhase("paused");
     setCapsuleOpen(true);
     setDraft("");
+    setApplying(false);
     setStatus("Brush lifted mid-stroke. Tell Palette what to change.");
   }, [phase]);
 
@@ -986,6 +1005,7 @@ function App() {
 
   useEffect(() => {
     if (phase !== "painting") return;
+    if (paintQueue.length === 0) return;
 
     if (activeStep >= paintQueue.length + paintPrepSteps.length) {
       setPhase("done");
@@ -1044,7 +1064,7 @@ function App() {
         if (currentRecorder && currentRecorder.state !== "inactive") {
           event.preventDefault();
           currentRecorder.stop();
-        } else if (phase === "painting") {
+        } else if (phase === "building" || phase === "painting") {
           event.preventDefault();
           interruptPainting();
         } else if (capsuleOpen) {
@@ -1879,7 +1899,7 @@ function CommandCapsule({
               <Mic size={16} />
               {listening ? "Set voice" : "Voice stroke"}
             </button>
-            {phase === "painting" ? (
+            {phase === "building" || phase === "painting" ? (
               <button type="button" onClick={onInterrupt}>
                 <Pause size={16} />
                 Interrupt

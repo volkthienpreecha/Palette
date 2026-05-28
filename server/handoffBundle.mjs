@@ -248,7 +248,50 @@ function sanitizeSection(section) {
     fields: sanitizeList(section.fields, 6),
     gallery: sanitizeList(section.gallery, 8),
     footerText: cleanText(section.footerText, 180),
+    generated: sanitizeGenerated(section.generated),
   });
+}
+
+function sanitizeGenerated(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const componentName = cleanComponentName(value.componentName);
+  const html = cleanGeneratedBlock(value.html, 18000);
+  const css = cleanGeneratedBlock(value.css, 18000);
+  const tsx = cleanGeneratedBlock(value.tsx, 24000);
+  const files = sanitizeGeneratedFiles(value.files);
+  if (!componentName && !html && !css && !tsx && !files?.length) return undefined;
+  return dropUndefined({ componentName, html, css, tsx, files });
+}
+
+function sanitizeGeneratedFiles(value) {
+  if (!Array.isArray(value)) return undefined;
+  const files = value
+    .slice(0, 8)
+    .map((file) => {
+      if (!file || typeof file !== "object") return null;
+      const filePath = cleanText(file.path, 160);
+      const content = cleanGeneratedBlock(file.content, 24000);
+      if (!/^generated\/sections\/[a-zA-Z0-9_-]+\.(tsx|css)$/i.test(filePath) || !content) return null;
+      return { path: filePath, content };
+    })
+    .filter(Boolean);
+  return files.length > 0 ? files : undefined;
+}
+
+function cleanGeneratedBlock(value, maxLength) {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/javascript:/gi, "")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function cleanComponentName(value) {
+  const cleaned = cleanText(value, 80).replace(/[^a-zA-Z0-9]/g, "");
+  if (!cleaned) return "";
+  const next = `${cleaned[0].toUpperCase()}${cleaned.slice(1)}`;
+  return /^[A-Z][A-Za-z0-9]*$/.test(next) ? next : "";
 }
 
 function sanitizeList(value, maxItems) {

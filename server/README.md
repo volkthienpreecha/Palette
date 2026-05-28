@@ -31,7 +31,7 @@ $env:OPENAI_API_KEY="sk-..."
 npm run api
 ```
 
-`npm run api` also loads a local `.env` file from the project root, so you can keep `OPENAI_API_KEY`, `GROQ_API_KEY`, and local demo flags there.
+`npm run api` also loads a local `.env` file from the project root, so you can keep `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, and local demo flags there.
 
 Then start the Vite app:
 
@@ -74,12 +74,14 @@ generated/PalettePage.tsx
 The backend loads the real local Impeccable skill plus Taste Skill and Emil's skill before each build. Provider selection is controlled by `PALETTE_BUILD_PROVIDER`:
 
 ```powershell
-$env:PALETTE_BUILD_PROVIDER="groq"
-$env:PALETTE_BUILD_PROVIDER="openai"
 $env:PALETTE_BUILD_PROVIDER="codex"
+$env:PALETTE_BUILD_PROVIDER="claude"
+$env:PALETTE_BUILD_PROVIDER="openai"
 ```
 
-If no provider is set, Groq is used when `GROQ_API_KEY` exists, then OpenAI when `OPENAI_API_KEY` exists, then Codex CLI. `codex` requires an authenticated local Codex CLI. The generated workspace boundary is verified after every run.
+If no provider is set, Claude is used when `ANTHROPIC_API_KEY` or `CLAUDE_API_KEY` exists, then Codex when a local Codex CLI is available, then OpenAI when `OPENAI_API_KEY` or `CODEX_API_KEY` exists. Groq is reserved for voice transcription. `codex` requires an authenticated local Codex CLI. The generated workspace boundary is verified after every run.
+
+When Palette launches the Codex CLI, it strips `OPENAI_API_KEY` and `CODEX_API_KEY` from the child environment by default so a stale `.env` key does not override local Codex Desktop auth. Set `PALETTE_CODEX_USE_API_KEY=1` only when you intentionally want Codex CLI to authenticate with those env keys.
 
 For a repeatable local verification pass:
 
@@ -87,9 +89,9 @@ For a repeatable local verification pass:
 npm run smoke:full-stack
 ```
 
-The smoke gate exercises skill loading, interview, reference persistence, build, patch, polish, and generated TypeScript compilation.
+The smoke gate exercises skill loading, interview, reference persistence, build, patch, polish, export bundle creation, and generated TypeScript compilation. It defaults to a dry-run builder for repeatability. Set `PALETTE_SMOKE_LIVE_BUILD=1` when you want the smoke test to spend real Codex, Claude, or OpenAI builder calls.
 
-`GET /api/build/status` returns the selected local build engine, model, and setup state. The frontend uses this for the `Live painter` card so users know whether Palette will paint through Groq, OpenAI, or Codex before starting a build.
+`GET /api/build/status` returns the selected local build engine, model, and setup state. The frontend uses this for the `Live painter` card so users know whether Palette will paint through Codex, Claude, or OpenAI before starting a build.
 
 `GET /api/workspaces/:projectId/bundle` returns a downloadable JSON bundle for the real generated workspace. It includes the product brief, design system, structured project JSON, standalone React page, and saved reference files. This is the code-agent handoff path for users who want to continue the generated frontend in Codex, Claude Code, Cursor, or another agent without using the repo apply button.
 

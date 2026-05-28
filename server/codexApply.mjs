@@ -113,7 +113,7 @@ function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, en
   ];
 
   if (model) codexArgs.push("-m", model);
-  codexArgs.push(prompt);
+  codexArgs.push("--", prompt);
 
   const usesCmdShim = process.platform === "win32" && /\.cmd$/i.test(codexCommand);
   const command = usesCmdShim ? "cmd.exe" : codexCommand;
@@ -166,6 +166,11 @@ function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, en
         reject(httpError(500, `Codex apply failed with exit code ${code}.${detail ? ` ${detail}` : ""}`));
         return;
       }
+      if (codexOutputIndicatesFailure(stdout, stderr)) {
+        const detail = cleanFailureDetail(stderr || stdout || summary);
+        reject(httpError(500, `Codex apply failed.${detail ? ` ${detail}` : ""}`));
+        return;
+      }
 
       resolve({
         summary: cleanText(summary, 2000),
@@ -176,8 +181,13 @@ function runCodex({ workspace, handoffRel, lastMessagePath, model, timeoutMs, en
 
 function codexEnv(env) {
   const next = { ...env };
-  if (next.CODEX_API_KEY && !next.OPENAI_API_KEY) {
-    next.OPENAI_API_KEY = next.CODEX_API_KEY;
+  if (next.PALETTE_CODEX_USE_API_KEY === "1") {
+    if (next.CODEX_API_KEY && !next.OPENAI_API_KEY) {
+      next.OPENAI_API_KEY = next.CODEX_API_KEY;
+    }
+  } else {
+    delete next.OPENAI_API_KEY;
+    delete next.CODEX_API_KEY;
   }
   return next;
 }
@@ -233,6 +243,13 @@ function cleanFailureDetail(value) {
     .replace(/\s+/g, " ")
     .trim();
   return cleaned.slice(Math.max(0, cleaned.length - 360));
+}
+
+function codexOutputIndicatesFailure(stdout, stderr) {
+  const text = `${stderr || ""}\n${stdout || ""}`;
+  return /\b401 Unauthorized\b/i.test(text) ||
+    /\bexceeded retry limit\b/i.test(text) ||
+    /(^|\n)\s*ERROR:/i.test(text);
 }
 
 function resolveCodexCommand(env) {

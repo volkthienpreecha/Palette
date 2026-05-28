@@ -43,7 +43,7 @@ export type BuildNote = {
 export type PaletteBuildResult = {
   applied: boolean;
   mode: "start" | "patch" | "polish";
-  source: "codex-cli" | "groq" | "openai" | "dry-run" | "local";
+  source: "codex-cli" | "claude" | "openai" | "dry-run" | "local";
   projectId: string;
   workspace: string;
   project: PaletteProject;
@@ -53,10 +53,15 @@ export type PaletteBuildResult = {
 };
 
 export type PaletteBuildEvent = {
-  type: "phase" | "output" | "result" | "error";
+  type: "phase" | "output" | "section" | "result" | "error";
   label: string;
   detail?: string;
   at?: string;
+  index?: number;
+  projectId?: string;
+  workspace?: string;
+  section?: PaletteSectionModel;
+  project?: PaletteProject;
   result?: PaletteBuildResult;
 };
 
@@ -81,7 +86,7 @@ export type WorkspaceBundleResult = {
 
 export type BuildEngineStatus = {
   ok: boolean;
-  selectedProvider: "groq" | "openai" | "codex";
+  selectedProvider: "codex" | "claude" | "openai";
   configuredProvider: string;
   label: string;
   ready: boolean;
@@ -140,22 +145,25 @@ export async function requestDesignContext(payload: BuildPayload): Promise<Desig
 export async function requestWorkspaceBuild(
   payload: BuildPayload,
   onEvent?: (event: PaletteBuildEvent) => void,
+  signal?: AbortSignal,
 ): Promise<PaletteBuildResult> {
-  return requestWorkspaceRun("/api/build/start", "/api/build/start-stream", payload, onEvent);
+  return requestWorkspaceRun("/api/build/start", "/api/build/start-stream", payload, onEvent, signal);
 }
 
 export async function requestWorkspacePatch(
   payload: BuildPayload,
   onEvent?: (event: PaletteBuildEvent) => void,
+  signal?: AbortSignal,
 ): Promise<PaletteBuildResult> {
-  return requestWorkspaceRun("/api/build/patch", "/api/build/patch-stream", payload, onEvent);
+  return requestWorkspaceRun("/api/build/patch", "/api/build/patch-stream", payload, onEvent, signal);
 }
 
 export async function requestWorkspacePolish(
   payload: BuildPayload,
   onEvent?: (event: PaletteBuildEvent) => void,
+  signal?: AbortSignal,
 ): Promise<PaletteBuildResult> {
-  return requestWorkspaceRun("/api/design/polish", "/api/design/polish-stream", payload, onEvent);
+  return requestWorkspaceRun("/api/design/polish", "/api/design/polish-stream", payload, onEvent, signal);
 }
 
 export async function requestWorkspaceBundle(projectId: string): Promise<WorkspaceBundleResult> {
@@ -179,10 +187,11 @@ async function requestWorkspaceRun(
   streamPath: string,
   payload: BuildPayload,
   onEvent?: (event: PaletteBuildEvent) => void,
+  signal?: AbortSignal,
 ): Promise<PaletteBuildResult> {
   try {
-    if (onEvent) return requestStream(streamPath, payload, onEvent);
-    const response = await postJson(plainPath, payload);
+    if (onEvent) return requestStream(streamPath, payload, onEvent, signal);
+    const response = await postJson(plainPath, payload, signal);
     const result = await readJson<PaletteBuildResult>(response, "Palette returned no build result.");
     if (!response.ok) throw new Error(result.error || `Build returned ${response.status}`);
     if (result.project && typeof result.status === "string") return result as PaletteBuildResult;
@@ -196,8 +205,9 @@ async function requestStream(
   path: string,
   payload: BuildPayload,
   onEvent: (event: PaletteBuildEvent) => void,
+  signal?: AbortSignal,
 ): Promise<PaletteBuildResult> {
-  const response = await postJson(path, payload);
+  const response = await postJson(path, payload, signal);
   if (!response.ok || !response.body) {
     const result = await readJson<PaletteBuildResult>(response, "Palette returned no build result.");
     throw new Error(result.error || `Build returned ${response.status}`);
@@ -238,11 +248,12 @@ async function requestStream(
   return finalResult;
 }
 
-async function postJson(path: string, payload: unknown) {
+async function postJson(path: string, payload: unknown, signal?: AbortSignal) {
   return fetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
 }
 
@@ -255,6 +266,28 @@ async function readJson<T>(response: Response, emptyMessage: string) {
 }
 
 function localFailure(error: unknown): PaletteBuildResult {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return {
+      applied: false,
+      mode: "start",
+      source: "local",
+      projectId: "",
+      workspace: "",
+      project: {
+        id: "palette-interrupted",
+        name: "Build interrupted",
+        theme: "atelier",
+        sections: [],
+        swatches: [],
+        brushLog: [{ id: "build-interrupted", label: "Build interrupted", detail: "The live section stream was paused." }],
+        past: [],
+        future: [],
+      },
+      files: [],
+      status: "Painting interrupted.",
+    };
+  }
+
   const message = friendlyError(error, "Palette backend offline. Start npm run api to paint with Codex.");
   return {
     applied: false,

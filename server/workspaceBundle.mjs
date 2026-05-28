@@ -11,6 +11,7 @@ const textFiles = [
   "skill-context.md",
   "generated/palette-project.json",
   "generated/PalettePage.tsx",
+  "generated/sections/manifest.json",
 ];
 const maxBundleBytes = 12_000_000;
 
@@ -31,6 +32,13 @@ export async function createWorkspaceBundle(projectId, env = process.env) {
     const bundled = await readBundleFile(root, file);
     if (!bundled) continue;
     totalBytes += bundled.bytes;
+    files.push(bundled.file);
+  }
+
+  const sectionFiles = await readGeneratedSectionFiles(root);
+  for (const bundled of sectionFiles) {
+    totalBytes += bundled.bytes;
+    if (totalBytes > maxBundleBytes) break;
     files.push(bundled.file);
   }
 
@@ -57,11 +65,28 @@ export async function createWorkspaceBundle(projectId, env = process.env) {
       "palette-brief.json",
       "generated/palette-project.json",
       "generated/PalettePage.tsx",
+      "generated/sections/",
     ],
     agentPrompt:
       "Use PRODUCT.md, DESIGN.md, palette-brief.json, and generated/palette-project.json as the source of truth. Integrate generated/PalettePage.tsx into the user's app without changing unrelated files.",
     files,
   };
+}
+
+async function readGeneratedSectionFiles(root) {
+  const sectionsDir = inside(root, "generated/sections");
+  const entries = await readdir(sectionsDir, { withFileTypes: true }).catch(() => []);
+  const files = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || entry.name === "manifest.json") continue;
+    const safeName = cleanFileName(entry.name);
+    if (!safeName || !/\.(tsx|css)$/i.test(safeName)) continue;
+    const bundled = await readBundleFile(root, `generated/sections/${safeName}`);
+    if (bundled) files.push(bundled);
+  }
+
+  return files;
 }
 
 async function readBundleFile(root, relativeFile) {

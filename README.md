@@ -96,7 +96,7 @@ Every generated section supports six visual variants:
 
 - **Frontend** — React 19, TypeScript, Vite, Framer Motion
 - **Backend** — Node.js HTTP server (no framework), streams build and Codex apply progress via NDJSON
-- **AI** — real skill-backed build runner with Groq/OpenAI/Codex provider selection, Codex CLI for repo apply, Groq Whisper for voice
+- **AI** — real skill-backed build runner with Codex/Claude/OpenAI provider selection, Codex CLI for repo apply, Groq Whisper for voice only
 - **Canvas model** — fully typed operation model with undo/redo history, export, and Codex-readable folder save
 
 ---

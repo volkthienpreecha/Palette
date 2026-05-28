@@ -15,6 +15,11 @@ import { createWorkspaceBundle } from "../server/workspaceBundle.mjs";
 
 loadEnvFile();
 
+const liveBuild = process.env.PALETTE_SMOKE_LIVE_BUILD === "1";
+if (!liveBuild && process.env.PALETTE_BUILD_DRY_RUN !== "1") {
+  process.env.PALETTE_BUILD_DRY_RUN = "1";
+}
+
 const tinyPng =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
@@ -69,10 +74,6 @@ function compileGenerated(tsxPath) {
 }
 
 async function main() {
-  if (!process.env.GROQ_API_KEY && process.env.PALETTE_BUILD_DRY_RUN !== "1") {
-    throw new Error("Set GROQ_API_KEY or PALETTE_BUILD_DRY_RUN=1 before running the full-stack smoke test.");
-  }
-
   const status = await skillStatus();
   check("skills status ok", status.ok, JSON.stringify(status.skills));
   check("impeccable loaded", status.skills?.impeccable?.loaded);
@@ -81,7 +82,7 @@ async function main() {
 
   const engine = buildEngineStatus();
   check("build engine status ok", engine.ok);
-  check("build engine has selected provider", ["groq", "openai", "codex"].includes(engine.selectedProvider));
+  check("build engine has selected provider", ["codex", "claude", "openai"].includes(engine.selectedProvider));
   check("build engine has human label", typeof engine.label === "string" && engine.label.length > 0);
 
   const interview = await nextInterviewQuestion({
@@ -133,7 +134,7 @@ async function main() {
     notes: context.notes,
   }, emit);
   check("build applied", start.applied);
-  check("build source is real or explicit dry run", ["groq", "openai", "codex-cli", "dry-run"].includes(start.source));
+  check("build source is real or explicit dry run", ["claude", "openai", "codex-cli", "dry-run"].includes(start.source));
   check("build has enough sections", start.project.sections.length >= 4, `${start.project.sections.length} sections`);
 
   const selected = start.project.sections.find((section) => section.kind === "hero") || start.project.sections[0];

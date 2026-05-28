@@ -440,11 +440,47 @@ export function createExportBundle(project: PaletteProject): string {
           path: "src/generated/PalettePage.tsx",
           content: createPalettePageSource(project),
         },
+        ...generatedSectionExportFiles(project),
       ],
     },
     null,
     2,
   );
+}
+
+function generatedSectionExportFiles(project: PaletteProject): Array<{ path: string; content: string }> {
+  const files: Array<{ path: string; content: string }> = [];
+  const manifest: Array<{ id: string; kind: string; componentName: string; files: string[] }> = [];
+
+  for (const section of project.sections) {
+    const generated = section.generated;
+    if (!generated?.componentName) continue;
+    const componentName = generated.componentName.replace(/[^a-zA-Z0-9]/g, "");
+    if (!componentName) continue;
+    const sectionFiles: string[] = [];
+    if (generated.tsx) {
+      const filePath = `src/generated/sections/${componentName}.tsx`;
+      files.push({ path: filePath, content: generated.tsx });
+      sectionFiles.push(filePath);
+    }
+    if (generated.css) {
+      const filePath = `src/generated/sections/${componentName}.css`;
+      files.push({ path: filePath, content: generated.css });
+      sectionFiles.push(filePath);
+    }
+    if (sectionFiles.length > 0) {
+      manifest.push({ id: section.id, kind: section.kind, componentName, files: sectionFiles });
+    }
+  }
+
+  if (manifest.length > 0) {
+    files.push({
+      path: "src/generated/sections/manifest.json",
+      content: JSON.stringify(manifest, null, 2),
+    });
+  }
+
+  return files;
 }
 
 export function sectionStatus(section: PaletteSectionModel, index: number): string {
