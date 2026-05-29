@@ -494,14 +494,15 @@ async function sendWorkspaceBuildStream(req, res, payload, runner) {
   res.setHeader("Content-Type", "application/x-ndjson");
   res.setHeader("Cache-Control", "no-store");
 
-  const write = (event) => {
-    res.write(`${JSON.stringify(event)}\n`);
-  };
-
   const controller = new AbortController();
   res.on("close", () => {
     if (!res.writableEnded) controller.abort();
   });
+
+  const write = (event) => {
+    if (controller.signal.aborted || res.writableEnded) return;
+    res.write(`${JSON.stringify(event)}\n`);
+  };
 
   try {
     const result = await runner(payload, write, process.env, { signal: controller.signal });
