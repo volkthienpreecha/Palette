@@ -26,6 +26,7 @@ import {
 import {
   applyOperation,
   createBlankProject,
+  parseIntent,
   redoProject,
   sectionStatus,
   undoProject,
@@ -109,6 +110,7 @@ const paintSectionDelayMs = 1450;
 const repaintDelayMs = 1250;
 
 const formIntentPattern = /\b(waitlist|form|email|signup|sign up|join|reserve|book|schedule|consult|contact|lead|request)\b/i;
+const imageSteeringPattern = /\b(image|photo|picture|visual|reference|uploaded|upload|replace|swap)\b/i;
 
 function isInlineFormStroke(command: string) {
   return formIntentPattern.test(command);
@@ -116,6 +118,26 @@ function isInlineFormStroke(command: string) {
 
 function isHeroFormAction(label: string) {
   return formIntentPattern.test(label);
+}
+
+function imageTargetForStroke(project: PaletteProject, selected: PaletteSectionModel | null) {
+  if (selected && (selected.kind === "hero" || selected.kind === "gallery" || selected.kind === "features")) return selected;
+  return (
+    project.sections.find((section) => section.kind === "hero") ??
+    project.sections.find((section) => section.kind === "gallery") ??
+    project.sections.find((section) => section.kind === "features") ??
+    selected
+  );
+}
+
+function isReferenceImageOperation(operation: PaletteOperation) {
+  if (operation.type !== "update_section") return false;
+  const patch = operation.patch;
+  return Boolean(
+    patch.imageUrl ||
+      patch.generated ||
+      patch.gallery?.some((item) => Boolean(item.imageUrl)),
+  );
 }
 
 function mergeStreamProject(current: PaletteProject | null, incoming: PaletteProject): PaletteProject {
@@ -597,7 +619,8 @@ function App() {
       const selectedMatch = selectedId
         ? baseProject.sections.find((section) => section.id === selectedId) ?? null
         : null;
-      const targetSection = selectedMatch ?? baseProject.sections.at(-1) ?? null;
+      const imageTarget = imageSteeringPattern.test(command) ? imageTargetForStroke(baseProject, selectedMatch) : null;
+      const targetSection = imageTarget ?? selectedMatch ?? baseProject.sections.at(-1) ?? null;
       const targetId = targetSection?.id ?? null;
 
       if (targetSection?.kind === "hero" && isInlineFormStroke(command)) {
@@ -608,6 +631,19 @@ function App() {
         setSelectedId(targetSection.id);
         setStatus("Painted a form into the selected hero.");
         return;
+      }
+
+      if (imageSteeringPattern.test(command)) {
+        const localIntent = parseIntent(command, { selectedId: targetId, project: baseProject });
+        if (localIntent.operations.length > 0 && localIntent.operations.every(isReferenceImageOperation)) {
+          setCapsuleOpen(false);
+          setListening(false);
+          resumeAfterSteerRef.current = false;
+          applyOperations(localIntent.operations);
+          const firstTarget = localIntent.operations.find(isReferenceImageOperation);
+          setSelectedId(firstTarget?.type === "update_section" ? firstTarget.id : targetId);
+          return;
+        }
       }
 
       setApplying(true);
@@ -679,6 +715,7 @@ function App() {
     },
     [
       applying,
+      applyOperations,
       brief,
       currentBuildNotes,
       ensureContext,

@@ -998,6 +998,7 @@ h1, h2, h3 {
   z-index: 1;
   display: grid;
   gap: 14px;
+  width: 100%;
   max-width: 1180px;
   margin: 0 auto;
   padding: 88px clamp(18px, 3vw, 42px) 72px;
@@ -1006,6 +1007,8 @@ h1, h2, h3 {
 .generated-section {
   position: relative;
   --section-title-boost: 0px;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid transparent;
   border-radius: 20px;
   color: var(--ink);
@@ -1036,6 +1039,17 @@ h1, h2, h3 {
 
 .section-motion-shell {
   min-width: 0;
+  max-width: 100%;
+}
+
+.generated-custom-surface {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  contain: layout paint;
+  isolation: isolate;
 }
 
 .generated-section:hover {

@@ -303,9 +303,12 @@ function cleanId(value) {
 }
 
 function cleanHref(value) {
-  const text = cleanText(value, 1200);
-  if (!text) return "";
-  if (text.startsWith("data:image/")) return text;
+  if (typeof value !== "string") return "";
+  const raw = value.trim();
+  if (!raw) return "";
+  if (/^data:image\//i.test(raw)) return raw.slice(0, 9_000_000);
+  if (/^\/api\/assets\//i.test(raw)) return raw.slice(0, 1200);
+  const text = cleanText(raw, 1200);
   try {
     const parsed = new URL(text);
     if (!["http:", "https:"].includes(parsed.protocol)) return "";

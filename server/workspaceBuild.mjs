@@ -211,6 +211,10 @@ async function runModelBuild({ mode, provider, payload, designWorkspace, skillSt
     return;
   }
 
+  if (mode === "patch" || mode === "polish") {
+    throw httpError(400, "Select one section before steering or polishing.");
+  }
+
   emitProgress(emit, "phase", providerDisplayName(provider), "A real model is painting the workspace files.");
   const project = await requestModelProject({ mode, provider, payload, skillStack, env, signal: options.signal });
   const normalized = normalizeGeneratedProject(project, payload, mode);
@@ -327,20 +331,6 @@ async function runProgressiveModelBuild({ provider, payload, designWorkspace, sk
   };
 
   await writeGeneratedFiles(designWorkspace, project);
-  const sectionTasks = plan.sections.map((plannedSection, index) =>
-    captureSectionTask(requestGeneratedSection({
-      provider,
-      payload,
-      skillStack,
-      env,
-      plan,
-      plannedSection,
-      project: projectContextForPlannedSection(project, plan, index),
-      index,
-      signal: options.signal,
-    })),
-  );
-
   for (let index = 0; index < plan.sections.length; index += 1) {
     throwIfAborted(options.signal);
     const plannedSection = plan.sections[index];
@@ -352,7 +342,18 @@ async function runProgressiveModelBuild({ provider, payload, designWorkspace, sk
     );
     project.paintPlan = updatePaintPlanStatus(project.paintPlan, plannedSection, "painting");
 
-    const generated = await unwrapSectionTask(sectionTasks[index]);
+    const generated = await requestGeneratedSection({
+      provider,
+      payload,
+      skillStack,
+      env,
+      plan,
+      plannedSection,
+      project: projectContextForPlannedSection(project, plan, index),
+      index,
+      signal: options.signal,
+    });
+    throwIfAborted(options.signal);
     const section = normalizeGeneratedSection(generated, plannedSection, payload, index);
     project.sections.push(section);
     project.paintPlan = updatePaintPlanStatus(project.paintPlan, plannedSection, "painted");
@@ -378,21 +379,6 @@ async function continueRemainingSectionsAfterPatch({ provider, payload, designWo
   const missing = missingPlannedSections(project.sections || [], plan.sections);
   if (missing.length === 0) return;
 
-  const sectionTasks = missing.map((plannedSection, index) => {
-    const plannedIndex = plan.sections.findIndex((section) => section.id === plannedSection.id);
-    return captureSectionTask(requestGeneratedSection({
-      provider,
-      payload,
-      skillStack,
-      env,
-      plan,
-      plannedSection,
-      project: projectContextForPlannedSection(project, plan, Math.max(plannedIndex, index)),
-      index: Math.max(plannedIndex, project.sections.length + index),
-      signal: options.signal,
-    }));
-  });
-
   for (let index = 0; index < missing.length; index += 1) {
     throwIfAborted(options.signal);
     const plannedSection = missing[index];
@@ -404,7 +390,18 @@ async function continueRemainingSectionsAfterPatch({ provider, payload, designWo
       plannedSection.purpose || "Palette is continuing the canvas after your steering note.",
     );
     project.paintPlan = updatePaintPlanStatus(project.paintPlan, plannedSection, "painting");
-    const generated = await unwrapSectionTask(sectionTasks[index]);
+    const generated = await requestGeneratedSection({
+      provider,
+      payload,
+      skillStack,
+      env,
+      plan,
+      plannedSection,
+      project: projectContextForPlannedSection(project, plan, Math.max(plannedIndex, index)),
+      index: Math.max(plannedIndex, project.sections.length + index),
+      signal: options.signal,
+    });
+    throwIfAborted(options.signal);
     const section = normalizeGeneratedSection(generated, plannedSection, payload, Math.max(plannedIndex, project.sections.length));
     project.sections.push(section);
     project.sections = orderSectionsByPlan(project.sections, plan.sections);
@@ -777,11 +774,28 @@ function buildPlanMessages({ payload, skillStack, env }) {
   ];
 }
 
+function boundedSectionRule(kind) {
+  const specific = kind === "nav"
+    ? "For nav, return only a compact navigation bar. It must not be sticky, fixed, full width viewport chrome, or include hero/body content."
+    : kind === "hero"
+      ? "For hero, return only the hero component. It must not include nav, footer, full-page shell, marquee site chrome, or a full viewport takeover."
+      : `For ${kind}, return only that ${kind} component. It must not include another planned section.`;
+
+  return [
+    "You are generating one bounded component inside an existing Palette canvas wrapper.",
+    "Do not generate a page shell.",
+    "Do not style html, body, main, :root, *, #root, or global page selectors.",
+    "Do not use position fixed, position sticky, viewport width/height units, negative margins, global z-index towers, or full-screen sections.",
+    specific,
+  ].join(" ");
+}
+
 function buildSectionMessages({ payload, skillStack, plan, plannedSection, project, index }) {
   const system = [
     "You are Palette's live section painter.",
     "Return JSON only. No markdown. No commentary.",
     "Generate exactly one section as real frontend artifacts, not a template selection.",
+    boundedSectionRule(plannedSection.kind),
     "The visible preview must come from generated.html and generated.css. The export must include generated.tsx.",
     "Use semantic HTML, bespoke layout, and section-specific CSS. Avoid generic cards unless the content truly needs cards.",
     "Keep the section compact: CSS under 120 lines, HTML under 60 lines, TSX under 90 lines.",
@@ -832,10 +846,13 @@ function buildSectionMessages({ payload, skillStack, plan, plannedSection, proje
 }
 
 function buildSectionPatchMessages({ mode, payload, skillStack, plannedSection, originalSection, currentProject, index }) {
+  const targetImageReference = targetImageReferenceForPayload(payload);
+  const imageReplacement = wantsImageReplacement(payload.command) && targetImageReference;
   const system = [
     "You are Palette's selected-section steering painter.",
     "Return JSON only. No markdown. No commentary.",
     "Regenerate exactly one selected section as real frontend artifacts.",
+    boundedSectionRule(originalSection.kind),
     "The visible preview must come from generated.html and generated.css. The export must include generated.tsx.",
     "Do not return the whole project. Do not modify unrelated sections.",
     "Keep the section compact: CSS under 120 lines, HTML under 60 lines, TSX under 90 lines.",
@@ -845,8 +862,11 @@ function buildSectionPatchMessages({ mode, payload, skillStack, plannedSection, 
     mode === "polish"
       ? "Apply polish through spacing, hierarchy, motion readiness, copy clarity, and interaction states."
       : "Apply the user's steering note directly to the selected section.",
+    imageReplacement
+      ? "The user is replacing the visual. Use targetImageReference.url exactly as the selected section's image source and include an img element with that src in generated.html."
+      : "",
     "Honor Impeccable, Taste Skill, and Emil motion/design rules as craft direction.",
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 
   const user = JSON.stringify({
     mode,
@@ -861,6 +881,7 @@ function buildSectionPatchMessages({ mode, payload, skillStack, plannedSection, 
       selected: section.id === originalSection.id,
     })),
     references: payload.references,
+    targetImageReference,
     notes: payload.notes,
     skillContext: compactSkillContext(skillStack, mode),
     sectionIndex: index,
@@ -872,6 +893,8 @@ function buildSectionPatchMessages({ mode, payload, skillStack, plannedSection, 
         title: "Real user-facing title",
         subtitle: "Optional user-facing support copy",
         eyebrow: "Optional short label",
+        imageUrl: imageReplacement ? targetImageReference.url : "Optional exact image URL for this selected section",
+        imageAlt: imageReplacement ? targetImageReference.title : "Optional image alt",
       },
       generated: {
         componentName: "PascalCaseComponentName",
@@ -1221,15 +1244,21 @@ function normalizeGeneratedSection(generated, plannedSection, payload, index) {
   const assetSource = generated?.generated && typeof generated.generated === "object" ? generated.generated : generated;
   const componentName = cleanComponentName(assetSource?.componentName) || componentNameForSection(section, index);
   const asset = sanitizeGeneratedAsset(assetSource, section, componentName);
-  return {
+  let nextSection = {
     ...section,
     generated: asset,
   };
+
+  if (wantsImageReplacement(payload.command)) {
+    nextSection = applyTargetImageReference(nextSection, targetImageReferenceForPayload(payload));
+  }
+
+  return nextSection;
 }
 
 function sanitizeGeneratedAsset(assetSource, section, componentName) {
   const html = cleanGeneratedHtml(assetSource?.html) || fallbackGeneratedHtml(section, componentName);
-  const css = cleanGeneratedCss(assetSource?.css) || fallbackGeneratedCss(componentName);
+  const css = cleanGeneratedCss(assetSource?.css, section.kind) || fallbackGeneratedCss(componentName);
   const tsx = cleanGeneratedTsx(assetSource?.tsx) || fallbackGeneratedTsx(section, componentName);
 
   return {
@@ -1242,6 +1271,86 @@ function sanitizeGeneratedAsset(assetSource, section, componentName) {
       { path: `generated/sections/${componentName}.css`, content: css },
     ],
   };
+}
+
+function wantsImageReplacement(command) {
+  return /\b(replace|use|swap|change|put|add|show|set)\b[\s\S]{0,80}\b(image|photo|picture|pic|reference|uploaded|upload|screenshot)\b/i.test(command || "") ||
+    /\b(image|photo|picture|pic|reference|uploaded|upload|screenshot)\b[\s\S]{0,80}\b(replace|use|swap|change|put|add|show|set)\b/i.test(command || "");
+}
+
+function targetImageReferenceForPayload(payload) {
+  const references = [
+    ...(Array.isArray(payload.references) ? payload.references : []),
+    ...(Array.isArray(payload.currentProject?.swatches) ? payload.currentProject.swatches : []),
+  ];
+  for (const reference of references) {
+    const url = cleanReferenceImageUrl(reference?.url);
+    if (!url) continue;
+    return {
+      id: cleanId(reference.id) || "reference-image",
+      title: cleanText(reference.title || reference.name || reference.originalName || "Uploaded reference", 120) || "Uploaded reference",
+      url,
+      note: cleanText(reference.note || reference.description, 260),
+    };
+  }
+  return null;
+}
+
+function cleanReferenceImageUrl(value) {
+  if (typeof value !== "string") return "";
+  const raw = value.trim();
+  if (/^data:image\//i.test(raw)) return raw.slice(0, 9_000_000);
+  if (/^\/api\/assets\//i.test(raw)) return raw.slice(0, 1200);
+  if (/^https?:\/\//i.test(raw) && /\.(png|jpe?g|webp|gif|avif)(\?|#|$)/i.test(raw)) return raw.slice(0, 1200);
+  return "";
+}
+
+function applyTargetImageReference(section, reference) {
+  if (!reference?.url) return section;
+  const imageAlt = reference.title || section.imageAlt || section.title || "Uploaded reference";
+  const generated = section.generated || {};
+  const html = injectReferenceImage(generated.html || "", reference.url, imageAlt);
+  const css = appendReferenceImageCss(generated.css || "");
+
+  if (section.kind === "gallery") {
+    const gallery = Array.isArray(section.gallery) && section.gallery.length > 0
+      ? section.gallery
+      : [{ title: reference.title, copy: reference.note || "Uploaded visual reference." }];
+    return {
+      ...section,
+      gallery: gallery.map((item, index) => index === 0
+        ? { ...item, title: reference.title || item.title, imageUrl: reference.url, imageAlt }
+        : item),
+      imageUrl: reference.url,
+      imageAlt,
+      generated: { ...generated, html, css },
+    };
+  }
+
+  return {
+    ...section,
+    imageUrl: reference.url,
+    imageAlt,
+    generated: { ...generated, html, css },
+  };
+}
+
+function injectReferenceImage(html, imageUrl, imageAlt) {
+  const safeUrl = escapeHtml(imageUrl);
+  const safeAlt = escapeHtml(imageAlt);
+  const imageMarkup = `<figure class="palette-reference-figure" data-palette-reference-image><img src="${safeUrl}" alt="${safeAlt}"></figure>`;
+  if (!html) return imageMarkup;
+  if (/<img\b/i.test(html)) {
+    return html
+      .replace(/<img\b([^>]*?)\s+src=(["'])[^"']*\2([^>]*)>/i, `<img$1 src="${safeUrl}"$3>`)
+      .replace(/<img\b((?:(?!\salt=)[^>])*)>/i, `<img$1 alt="${safeAlt}">`);
+  }
+  return html.replace(/<\/(section|div|article|nav|footer)>\s*$/i, `${imageMarkup}</$1>`) || `${html}${imageMarkup}`;
+}
+
+function appendReferenceImageCss(css) {
+  const rule = `.palette-reference-figure { margin: 24px 0 0; width: min(420px, 100%); overflow: hidden; border-radius: 24px; background: #e8dccb; } .palette-reference-figure img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }`;
+  return css.includes("palette-reference-figure") ? css : `${css}\n${rule}`.trim();
 }
 
 function cleanSectionTitle(value, kind) {
@@ -1269,12 +1378,17 @@ function componentNameForSection(section, index) {
 
 function cleanGeneratedHtml(value) {
   if (typeof value !== "string") return "";
-  return normalizeGeneratedText(value)
+  const cleaned = normalizeGeneratedText(value)
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<\/?(html|body)[^>]*>/gi, "")
+    .replace(/<main\b/gi, "<section")
+    .replace(/<\/main>/gi, "</section>")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/javascript:/gi, "")
     .trim()
     .slice(0, 18000);
+  return /<[a-z][\s/>]/i.test(cleaned) ? cleaned : "";
 }
 
 function cleanGeneratedCss(value) {
@@ -1284,6 +1398,14 @@ function cleanGeneratedCss(value) {
     .replace(/^\s*@import[^\r\n]*(?:\r?\n|$)/gim, "")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/url\(\s*javascript:[^)]+\)/gi, "")
+    .replace(/(^|})\s*(html|body|main|:root|#root)\b[^{]*\{[^{}]*\}/gi, "$1")
+    .replace(/(^|})\s*\*[^{]*\{[^{}]*\}/g, "$1")
+    .replace(/\bposition\s*:\s*(fixed|sticky)\s*;?/gi, "position: relative;")
+    .replace(/\b(width|min-width|max-width)\s*:\s*100(vw|svw|dvw|lvw)\s*;?/gi, "$1: 100%;")
+    .replace(/\bheight\s*:\s*100(vh|svh|dvh|lvh)\s*;?/gi, "height: auto;")
+    .replace(/\bmin-height\s*:\s*100(vh|svh|dvh|lvh)\s*;?/gi, "min-height: 0;")
+    .replace(/\bz-index\s*:\s*\d{2,}\s*;?/gi, "z-index: 1;")
+    .replace(/\bmargin(?:-[a-z]+)?\s*:\s*-\d[\d.]*(px|rem|em|vh|vw|%)\s*;?/gi, "margin: 0;")
     .trim()
     .slice(0, 18000);
 }

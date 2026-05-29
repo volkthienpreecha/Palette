@@ -91,8 +91,6 @@ export type OperationResult = {
   status: string;
 };
 
-const robotCoffeeReference = "/robot-coffee-reference.png";
-
 export const paintingStageLabels = [
   "Prime canvas",
   "Mix swatches",
@@ -1006,11 +1004,14 @@ function preciseSectionOperationsFromText(
   }
 
   if (imageTarget && wantsBetterImage(text)) {
-    operations.push({
-      type: "update_section",
-      id: imageTarget.id,
-      patch: imagePatchForSection(imageTarget, project),
-    });
+    const patch = imagePatchForSection(imageTarget, project);
+    if (Object.keys(patch).length > 0) {
+      operations.push({
+        type: "update_section",
+        id: imageTarget.id,
+        patch,
+      });
+    }
   }
 
   const heroId = firstSectionId(project, "hero") ?? targetId;
@@ -1229,6 +1230,8 @@ function imageTargetSection(project: PaletteProject, selectedId: string | null):
 
 function imagePatchForSection(section: PaletteSectionModel, project: PaletteProject): Partial<PaletteSectionModel> {
   const reference = latestImageReference(project);
+  if (!reference) return {};
+  const generated = applyReferenceToGeneratedAsset(section, reference);
   if (section.kind === "gallery") {
     const gallery = section.gallery?.length
       ? section.gallery
@@ -1250,6 +1253,7 @@ function imagePatchForSection(section: PaletteSectionModel, project: PaletteProj
             }
           : item,
       ),
+      ...(generated ? { generated } : {}),
     };
   }
 
@@ -1257,16 +1261,81 @@ function imagePatchForSection(section: PaletteSectionModel, project: PaletteProj
     imageUrl: reference.url,
     imageAlt: reference.alt,
     eyebrow: section.eyebrow ?? "Reference upgraded",
+    ...(generated ? { generated } : {}),
   };
 }
 
 function latestImageReference(project: PaletteProject) {
-  const swatch = project.swatches.find((item) => item.url);
+  const swatch = project.swatches.find((item) => item.url && isImageReferenceUrl(item.url));
+  if (!swatch?.url) return null;
   return {
-    url: swatch?.url ?? robotCoffeeReference,
-    alt: swatch?.title || "Robot assistant beside an espresso machine",
-    title: swatch?.title || "Robot coffee study",
+    url: swatch.url,
+    alt: swatch.title || "Uploaded reference image",
+    title: swatch.title || "Uploaded reference",
   };
+}
+
+function isImageReferenceUrl(url: string) {
+  return /^data:image\//i.test(url) ||
+    /^\/api\/assets\//i.test(url) ||
+    /\.(png|jpe?g|webp|gif|avif|svg)(\?|#|$)/i.test(url);
+}
+
+function applyReferenceToGeneratedAsset(
+  section: PaletteSectionModel,
+  reference: { url: string; alt: string; title: string },
+): PaletteSectionModel["generated"] | undefined {
+  const generated = section.generated;
+  if (!generated) return undefined;
+  const css = `${generated.css ?? ""}\n${referenceImageCss()}`.trim();
+  return {
+    ...generated,
+    html: injectReferenceImageIntoHtml(generated.html ?? "", reference),
+    css,
+    tsx: injectReferenceImageIntoTsx(generated.tsx ?? "", reference),
+    files: generated.files?.map((file) => {
+      if (/\.css$/i.test(file.path)) return { ...file, content: css };
+      if (/\.tsx$/i.test(file.path)) return { ...file, content: injectReferenceImageIntoTsx(file.content, reference) };
+      return file;
+    }),
+  };
+}
+
+function injectReferenceImageIntoHtml(html: string, reference: { url: string; alt: string }) {
+  const image = `<img class="palette-injected-reference-image" src="${escapeAttribute(reference.url)}" alt="${escapeAttribute(reference.alt)}" />`;
+  if (/<img\b/i.test(html)) {
+    return html.replace(/<img\b[^>]*>/i, image);
+  }
+  const figure = `<figure class="palette-injected-reference"><div class="palette-injected-reference-frame">${image}</div></figure>`;
+  if (/<\/section>\s*$/i.test(html)) return html.replace(/<\/section>\s*$/i, `${figure}</section>`);
+  return `${html}${figure}`;
+}
+
+function injectReferenceImageIntoTsx(tsx: string, reference: { url: string; alt: string }) {
+  if (!tsx) return tsx;
+  const image = `<img className="palette-injected-reference-image" src="${escapeAttribute(reference.url)}" alt="${escapeAttribute(reference.alt)}" />`;
+  if (/<img\b/i.test(tsx)) {
+    return tsx.replace(/<img\b[^>]*\/?>/i, image);
+  }
+  const figure = `<figure className="palette-injected-reference"><div className="palette-injected-reference-frame">${image}</div></figure>`;
+  if (/<\/section>\s*\);/i.test(tsx)) return tsx.replace(/<\/section>\s*\);/i, `${figure}</section>\n  );`);
+  return tsx;
+}
+
+function referenceImageCss() {
+  return [
+    ".palette-injected-reference { margin: clamp(18px, 3vw, 34px) 0 0; }",
+    ".palette-injected-reference-frame { overflow: hidden; border-radius: 28px; min-height: clamp(220px, 32vw, 430px); background: #d8c09b; box-shadow: inset 0 1px 0 rgba(255,255,255,.35); }",
+    ".palette-injected-reference-image { display: block; width: 100%; height: 100%; min-height: inherit; object-fit: cover; }",
+  ].join("\n");
+}
+
+function escapeAttribute(value: string) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function sectionOperationsFromText(

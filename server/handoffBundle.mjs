@@ -344,9 +344,12 @@ function cleanColor(value) {
 }
 
 function cleanHref(value) {
-  if (typeof value !== "string" || value.length > 240) return undefined;
-  if (value.startsWith("#") || value.startsWith("/") || /^https?:\/\//i.test(value) || /^blob:/i.test(value)) {
-    return value;
+  if (typeof value !== "string") return undefined;
+  const raw = value.trim();
+  if (!raw) return undefined;
+  if (/^data:image\//i.test(raw)) return raw.slice(0, 9_000_000);
+  if (raw.startsWith("#") || raw.startsWith("/") || /^https?:\/\//i.test(raw) || /^blob:/i.test(raw)) {
+    return raw.length > 1200 && !raw.startsWith("/") ? undefined : raw;
   }
   return undefined;
 }
