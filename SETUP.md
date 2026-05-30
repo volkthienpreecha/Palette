@@ -23,7 +23,7 @@ Install these first:
 Open PowerShell in the project folder:
 
 ```powershell
-cd C:\Users\volko\Downloads\Palette
+cd path\to\Palette
 ```
 
 Install the project packages:
@@ -57,7 +57,7 @@ You need two PowerShell windows.
 In the first window, start the backend:
 
 ```powershell
-cd C:\Users\volko\Downloads\Palette
+cd path\to\Palette
 npm run api
 ```
 
@@ -66,7 +66,7 @@ Leave that window open.
 In the second window, start the frontend:
 
 ```powershell
-cd C:\Users\volko\Downloads\Palette
+cd path\to\Palette
 npm run dev
 ```
 

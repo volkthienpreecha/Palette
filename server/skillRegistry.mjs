@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { cleanText, httpError, inside } from "./handoffBundle.mjs";
 
-const defaultImpeccablePath = String.raw`C:\Users\volko\OneDrive\Documents\Postmortem\.agents\skills\impeccable`;
+const defaultImpeccablePath = path.resolve(process.cwd(), ".agents/skills/impeccable");
 const skillCacheDir = ".palette/skill-cache";
 
 const remoteSkills = {

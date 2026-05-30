@@ -183,6 +183,7 @@ function App() {
   const [listening, setListening] = useState(false);
   const [applying, setApplying] = useState(false);
   const [repoApplying, setRepoApplying] = useState(false);
+  const [varnishing, setVarnishing] = useState(false);
   const [savingProject, setSavingProject] = useState(false);
   const [codexEvents, setCodexEvents] = useState<StudioProgressEvent[]>([]);
   const [engineStatus, setEngineStatus] = useState<BuildEngineStatus | null>(null);
@@ -923,6 +924,8 @@ function App() {
     });
     setRepoApplying(false);
     setStatus(result.status);
+    setVarnishing(true);
+    window.setTimeout(() => setVarnishing(false), 1200);
   }, [project, submissions, workspaceNotes]);
 
   const saveToFolder = useCallback(async () => {
@@ -1050,7 +1053,7 @@ function App() {
 
   const recordSubmission = useCallback(
     (section: PaletteSectionModel, values: Record<string, FormDataEntryValue>) => {
-      const submission = createSubmission(projectRef.current ?? project, section, values);
+      const submission = createSubmission(projectRef.current!, section, values);
       setSubmissions((current) => [submission, ...current].slice(0, 40));
       setStatus(
         submission.kind === "waitlist"
@@ -1058,7 +1061,7 @@ function App() {
           : "Pinned the contact note to submissions.",
       );
     },
-    [project],
+    [],
   );
 
   const addFiles = useCallback(
@@ -1085,7 +1088,7 @@ function App() {
             projectRef.current = next;
             return next;
           });
-        });
+        }).catch(() => {});
       }
       setStatus(`${imageFiles.length} reference${imageFiles.length === 1 ? "" : "s"} pinned to the canvas.`);
     },
@@ -1285,7 +1288,7 @@ function App() {
       <div className="atelier-wash" aria-hidden="true" />
       <header className="studio-header">
         <div>
-          <p className="studio-mark">Introducing Codex Palette</p>
+          <p className="studio-mark">Palette</p>
           <h1>Paint software into code.</h1>
         </div>
         <div className="header-actions">
@@ -1339,25 +1342,33 @@ function App() {
           <div
             className={`canvas-board ${phase === "painting" || phase === "building" || phase === "repainting" ? "is-painting" : ""} ${
               phase === "repainting" ? "is-repainting" : ""
-            }`}
+            } ${varnishing ? "is-varnishing" : ""}`}
             onDragOver={(event) => event.preventDefault()}
             onDrop={(event) => {
               event.preventDefault();
               addFiles(event.dataTransfer.files);
             }}
           >
+            <CanvasStatus status={status} phase={phase} />
             <AnimatePresence mode="popLayout">
               {phase === "idle" && project.sections.length === 0 ? (
                 <motion.div
                   className="blank-canvas"
                   key="blank"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
                   exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
                 >
+                  {/* Floating ink-stroke decorations */}
+                  <span className="canvas-mark canvas-mark-1" aria-hidden="true" />
+                  <span className="canvas-mark canvas-mark-2" aria-hidden="true" />
+                  <span className="canvas-mark canvas-mark-3" aria-hidden="true" />
+                  <span className="canvas-mark canvas-mark-4" aria-hidden="true" />
+                  <span className="canvas-mark canvas-mark-5" aria-hidden="true" />
                   <h2>A clean canvas.</h2>
                   <p>
-                    Press Ctrl K, place the first brushstroke, then interrupt while the canvas paints.
+                    Place the first brushstroke. Interrupt while it paints. Steer mid-stroke.
                   </p>
                   <button className="primary-stroke" type="button" onClick={() => openCommandCapsule("")}>
                     Begin with a brushstroke
@@ -1875,10 +1886,10 @@ function GeneratedPage({
             className="section-motion-shell"
             key={section.id}
             layout
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -14 }}
-            transition={{ duration: 0.38, ease: [0.16, 1, 0.3, 1] }}
+            initial={{ clipPath: "inset(0 100% 0 0 round 20px)", opacity: 0.7 }}
+            animate={{ clipPath: "inset(0 0% 0 0 round 20px)", opacity: 1 }}
+            exit={{ opacity: 0, y: -10, transition: { duration: 0.22 } }}
+            transition={{ duration: 0.52, ease: [0.16, 1, 0.3, 1] }}
           >
             <PaletteSectionView
               section={section}
@@ -2019,17 +2030,58 @@ function CommandCapsule({
           className="command-compact"
           type="button"
           onClick={onOpen}
-          initial={{ opacity: 0, y: 10, scale: 0.97 }}
+          initial={{ opacity: 0, y: 12, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 8, scale: 0.97 }}
-          transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
+          exit={{ opacity: 0, y: 10, scale: 0.96 }}
+          transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
         >
-          <Mic size={18} />
-          <span>Ctrl K steer</span>
+          <Mic size={17} />
+          <span className="command-compact-label">
+            {phase === "idle"
+              ? "Begin with a brushstroke"
+              : phase === "painting" || phase === "building"
+              ? "Interrupt or steer"
+              : phase === "paused"
+              ? "Continue steering"
+              : selectedSection
+              ? `Steer ${selectedSection.kind}`
+              : "Steer the canvas"}
+          </span>
+          <span className="command-compact-hint">⌘K</span>
         </motion.button>
       )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function CanvasStatus({ status, phase }: { status: string; phase: Phase }) {
+  const visible = phase !== "idle";
+  return (
+    <AnimatePresence>
+      {visible ? (
+        <motion.div
+          className="canvas-status"
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <span className={`canvas-status-dot phase-${phase}`} aria-hidden="true" />
+          <AnimatePresence mode="wait">
+            <motion.span
+              key={status}
+              initial={{ opacity: 0, y: 3 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -3 }}
+              transition={{ duration: 0.16 }}
+            >
+              {status}
+            </motion.span>
+          </AnimatePresence>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 

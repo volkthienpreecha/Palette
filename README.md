@@ -6,19 +6,17 @@
 
 ## The Problem
 
-Every AI coding tool gives you the same experience: you write a prompt, you wait, you get back a wall of code you didn't watch happen. If the result is wrong, you start over from scratch.
+Every AI coding tool gives you the same experience: write a prompt, wait, get back a wall of code you didn't watch happen. If the result is wrong, start over.
 
-The most powerful coding agent in the world — Codex — still feels like a black box. You can't see what it's building. You can't change direction mid-generation. You just wait and hope.
-
-We use Codex every day. That friction is real, and it keeps Codex out of reach for anyone who isn't already comfortable in a terminal.
+Codex is the most capable coding agent available. It still feels like a black box. You can't see what it's building. You can't change direction mid-generation. You just wait and hope.
 
 ---
 
 ## The Solution
 
-Palette is a canvas-first workspace for Codex.
+Palette is a visual workspace for Codex.
 
-Instead of a chat box, you get a canvas. Instead of waiting, you watch Codex paint your frontend in real time — section by section, layer by layer. And instead of restarting when something looks wrong, you interrupt, point at the section, give a new direction, and Codex steers from exactly where it stopped.
+Instead of a chat box, you get a canvas. Instead of waiting, you watch Codex paint your frontend in real time — section by section. And instead of restarting when something looks wrong, you interrupt, point at the section, give a new direction, and Codex steers from exactly where it stopped.
 
 When it looks right, one button hands the canvas to Codex and it writes the real React files to disk.
 
@@ -27,16 +25,16 @@ When it looks right, one button hands the canvas to Codex and it writes the real
 ## How It Works
 
 ```
-Paint  →  Steer  →  Interrupt  →  Set the paint
+Prime  →  Paint  →  Steer  →  Set the paint
 ```
 
-**1. Paint** — Type one sentence. Palette sends it to Codex, which begins forming a frontend on the canvas in visible strokes. Hero, features, pricing, testimonials — each section appears as it's built.
+**1. Prime** — A short design interview before painting. Answer in plain language. Add reference images, links, or Figma files. Palette mixes them into context before the first brushstroke.
 
-**2. Steer** — Click any section while it's forming. Open the command capsule, type a new direction, and Codex incorporates it without restarting. Voice input is also supported.
+**2. Paint** — Type one sentence. Palette sends it to the build engine, which forms a frontend on the canvas in visible strokes — nav, hero, features, pricing, testimonials — each section appearing as it's built.
 
-**3. Interrupt** — Press Escape at any moment to lift the brush. The canvas pauses. You can inspect, redirect, or delete any section before Codex continues.
+**3. Steer** — Press Escape mid-paint to pause. Click any section, type a direction in the command capsule or speak it, and Codex incorporates it without restarting. The canvas steers from exactly where it stopped.
 
-**4. Set the paint** — When the canvas looks right, hit Codex Apply. Codex writes `src/generated/PalettePage.tsx` to your repo — real, working React code, not a screenshot.
+**4. Set the paint** — When the canvas looks right, click Codex Apply. Real React component files are written to disk. Not a screenshot — working code.
 
 ---
 
@@ -52,30 +50,18 @@ Paint  →  Steer  →  Interrupt  →  Set the paint
 
 ---
 
-## Built With Codex
+## The Interface
 
-Palette was built using OpenAI Codex throughout development. The canvas painting flow — sections forming in sequence, the steering model, the interrupt mechanism — was designed around Codex's strengths as an execution agent, not a generic LLM.
+The studio shell is warm ivory — like a physical painter's workspace. The canvas inside it is near-black — where the work appears. Generated sections emerge on it as luminous panels, like paintings forming on a dark surface.
 
-The core loop:
-
-1. A structured canvas model describes the frontend as typed sections with variants
-2. The OpenAI Responses API resolves natural language into safe canvas operations
-3. Codex receives a clean, validated handoff and writes the output files
-4. The frontend reflects every change in real time as operations apply
-
----
-
-## The Canvas
-
-The interface is designed to make Codex feel approachable to anyone — not just developers.
-
-- **Blank canvas first** — open space, one obvious way to begin
-- **Painting stage** — sections appear in visible layers with a warm light sweep as each one forms
-- **Corgi studio guide** — a small companion that narrates every phase of painting in plain language
-- **Status rail** — shows the current painting phase so you always know where Codex is
-- **Reference swatches** — drag and drop images; Palette extracts colors and mixes them into the canvas
-- **Brush toolbar** — click any section to move it, remove it, or change its style
-- **Command capsule** — fixed at the bottom, opens for text or voice steering at any moment
+- **Blank canvas** — open space, one obvious way to begin
+- **Design interview** — plain language questions before the first wash
+- **Reference board** — pin images, links, or notes; Palette extracts colors and mixes them into the build context
+- **Painting stage** — sections appear with a brushstroke reveal, left to right, as each one forms
+- **Canvas status** — floating pill at the top of the canvas shows the current painting phase in real time
+- **Brush toolbar** — click any section to move it, remove it, steer it, or polish it
+- **Command capsule** — fixed at the bottom; opens for text or voice steering at any moment; context-aware label shows what it will do
+- **Varnish moment** — when Codex apply completes, a single gold-verdigris ripple radiates across the canvas
 
 ---
 
@@ -84,10 +70,10 @@ The interface is designed to make Codex feel approachable to anyone — not just
 Every generated section supports six visual variants:
 
 - **Atelier** — warm canvas surface, editorial type, soft paper texture
-- **Premium** — deep dark surface, cobalt accents, refined spacing
+- **Premium** — deep dark surface, verdigris accents, refined spacing
 - **Playful** — rounded corners, warmer palette, more expressive
 - **Minimal** — flat white, type-only, hairline borders
-- **Glass** — frosted surface, intentional blur, cobalt-tinted edges
+- **Glass** — frosted surface, intentional blur, tinted edges
 - **Editorial** — dark ink panel, reversed type, high contrast
 
 ---
@@ -95,9 +81,10 @@ Every generated section supports six visual variants:
 ## Technical Details
 
 - **Frontend** — React 19, TypeScript, Vite, Framer Motion
-- **Backend** — Node.js HTTP server (no framework), streams build and Codex apply progress via NDJSON
-- **AI** — real skill-backed build runner with Codex/Claude/OpenAI provider selection, Codex CLI for repo apply, Groq Whisper for voice only
-- **Canvas model** — fully typed operation model with undo/redo history, export, and Codex-readable folder save
+- **Backend** — Node.js HTTP server (no framework), streams build and apply progress via NDJSON
+- **AI** — OpenAI Responses API for intent resolution, skill-backed workspace builder with Codex/Claude/OpenAI provider selection, Codex CLI for repo apply, Groq Whisper for voice
+- **Canvas model** — fully typed operation model with undo/redo history, brush log, pinned notes, submission tracking, export, and Codex-readable folder save
+- **Design** — Cormorant Garamond display type, JetBrains Mono UI labels, OKLCH color system throughout, verdigris accent (`oklch(0.54 0.12 172)`)
 
 ---
 
@@ -113,8 +100,19 @@ npm run api   # backend on :8787
 npm run dev   # frontend on :5173
 ```
 
+Open `http://localhost:5173`.
+
 ---
 
 ## Demo Flow
 
-The old stage script now lives in [docs/demo-sequence.md](docs/demo-sequence.md). The normal app flow uses the real interview, reference board, Codex build, steering, and polish path.
+1. Open the app
+2. Click **Begin with a brushstroke**
+3. Describe what you want to build in plain language
+4. Answer the design questions
+5. Add a reference image or link if you have one, then click **Begin painting**
+6. Watch the canvas paint — press Escape to interrupt mid-stroke
+7. Click any section and steer it from the command capsule
+8. Click **Codex apply** and watch the real files write to disk
+
+The full stage script lives in [docs/demo-sequence.md](docs/demo-sequence.md).
